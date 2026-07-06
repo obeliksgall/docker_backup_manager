@@ -231,6 +231,10 @@ def execute_backup_process(task: dict):
         else:
             cmd.append("copy")
             
+        # --- DODAJ TE FLAGI OPTYMALIZUJĄCE RAM ---
+        #cmd.extend(["--buffer-size=16M", "--transfers=2"])
+        # ----------------------------------------
+            
         for ex in task.get("exclude", []):
             if ex: cmd.extend(["--exclude", ex])
         cmd.extend([task["source"], task["destination"], "-v"])
