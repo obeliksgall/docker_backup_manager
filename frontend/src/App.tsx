@@ -203,11 +203,34 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (token) {
+  // ZNAJDŹ TEN BLOK:
+// useEffect(() => {
+//   if (token) {
+//     fetchTasks();
+//   }
+// }, [token]);
+
+// I PODMIEŃ NA TEN INTELIGENTNY MECHANIZM:
+useEffect(() => {
+  if (!token) return;
+
+  // Pierwsze, natychmiastowe pobranie zadań po wejściu na stronę
+  fetchTasks();
+
+  // Uruchamiamy cykliczny interwał sprawdzający (co 5/10 sekund)
+  const interval = setInterval(() => {
+    // Sprawdzamy, czy w aktualnym stanie aplikacji jakiekolwiek zadanie ma status wykonywania
+    const hasRunningTasks = tasks.some(task => task.status === 'RUNNING');
+    
+    // Jeśli coś się wykonuje, odświeżamy dane z API automatycznie w tle
+    if (hasRunningTasks) {
       fetchTasks();
     }
-  }, [token]);
+  }, 10000); // 5000 ms = 5 sekund // 10000 ms = 10 sekund
+
+  // Czyszczenie interwału przy odmontowywaniu komponentu, żeby nie marnować zasobów
+  return () => clearInterval(interval);
+}, [token, tasks]); // Ważne: dodajemy 'tasks' do tablicy zależności, aby interwał widział aktualny stan
 
   // JEŚLI NIE MA TOKENU - WYŚWIETLAMY WPROST EKRAN LOGOWANIA
   if (!token) {
@@ -314,24 +337,26 @@ export default function App() {
                 
                 {/* Przyciski operacyjne w rogu karty */}
 				<div className="absolute top-5 right-5 flex gap-1 opacity-40 group-hover:opacity-100 transition">
-				  <button 
-					onClick={() => fetchLogs(task)} 
-					className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition" 
-					title={t('tooltip_logs') || 'Logi'}
-				  >
+				  <button onClick={() => fetchLogs(task)} className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition" title={t('tooltip_logs') || 'Logi'}>
 					<FileText className="w-4 h-4" />
 				  </button>
+				  
+				  {/* EDYCJA - zablokowana podczas RUNNING */}
 				  <button 
-					onClick={() => { setSelectedTask(task); setIsModalOpen(true); }} 
-					className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded-lg transition" 
-					title={t('tooltip_edit') || 'Edytuj'}
+					onClick={() => { if(task.status !== 'RUNNING') { setSelectedTask(task); setIsModalOpen(true); } }} 
+					disabled={task.status === 'RUNNING'}
+					className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded-lg transition disabled:opacity-30 disabled:hover:text-slate-400 disabled:cursor-not-allowed" 
+					title={task.status === 'RUNNING' ? '' : (t('tooltip_edit') || 'Edytuj')}
 				  >
 					<Edit2 className="w-4 h-4" />
 				  </button>
+				  
+				  {/* USUWANIE - zablokowane podczas RUNNING */}
 				  <button 
-					onClick={() => handleDeleteTask(task.id, task.name)} 
-					className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-red-400 rounded-lg transition" 
-					title={t('tooltip_delete') || 'Usuń'}
+					onClick={() => { if(task.status !== 'RUNNING') handleDeleteTask(task.id, task.name); }} 
+					disabled={task.status === 'RUNNING'}
+					className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-red-400 rounded-lg transition disabled:opacity-30 disabled:hover:text-slate-400 disabled:cursor-not-allowed" 
+					title={task.status === 'RUNNING' ? '' : (t('tooltip_delete') || 'Usuń')}
 				  >
 					<Trash2 className="w-4 h-4" />
 				  </button>
@@ -362,44 +387,43 @@ export default function App() {
                 </div>
 
                 {/* Stopka karty z wykonaniem zadania */}
-                <div className="border-t border-slate-800/60 pt-4 mt-2 flex justify-between items-center gap-2 select-none">
-                  <div className="flex items-center gap-1.5 text-xs">
-					  {task.status === 'RUNNING' ? (
-						<span className="text-indigo-400 flex items-center gap-1 font-semibold animate-pulse">
-						  <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('status_processing') || 'W trakcie...'}
-						</span>
-					  ) : task.status === 'OK' || task.status === 'SUKCES' ? (
-						<span className="text-emerald-400 flex items-center gap-1 font-semibold"><CheckCircle className="w-3.5 h-3.5" /> {t('status_success') || 'Sukces'}</span>
-					  ) : task.status ? (
-						<span className="text-red-400 flex items-center gap-1 font-semibold"><XCircle className="w-3.5 h-3.5" /> {t('status_error') || 'Błąd'}</span>
-					  ) : (
-						<span className="text-slate-500 font-medium">{t('status_never') || 'Nieuruchamiane'}</span>
-					  )}
-					</div>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleRestore(task)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-700/40">
-                      Restore
-                    </button>
-                    <button 
+				<div className="border-t border-slate-800/60 pt-4 mt-2 flex justify-between items-center gap-2 select-none">
+				  <div className="flex items-center gap-1.5 text-xs">
+					{task.status === 'RUNNING' ? (
+					  <span className="text-indigo-400 flex items-center gap-1 font-semibold animate-pulse"><Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('status_processing') || 'W trakcie...'}</span>
+					) : task.status === 'OK' || task.status === 'SUKCES' ? (
+					  <span className="text-emerald-400 flex items-center gap-1 font-semibold"><CheckCircle className="w-3.5 h-3.5" /> {t('status_success') || 'Sukces'}</span>
+					) : task.status ? (
+					  <span className="text-red-400 flex items-center gap-1 font-semibold"><XCircle className="w-3.5 h-3.5" /> {t('status_error') || 'Błąd'}</span>
+					) : (
+					  <span className="text-slate-500 font-medium">{t('status_never') || 'Nieuruchamiane'}</span>
+					)}
+				  </div>
+				  
+				  <div className="flex gap-2">
+					{/* PRZYCISK RESTORE – TERAZ ZABEZPIECZONY */}
+					<button 
+					  onClick={() => handleRestore(task)} 
+					  // Blokujemy, jeśli stan sieci wysyła żądanie LUB jeśli status z backendu to RUNNING
+					  disabled={runningTasks[task.id] || task.status === 'RUNNING'}
+					  className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 disabled:border-slate-800/40 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-700/40 cursor-pointer disabled:cursor-not-allowed"
+					>
+					  Restore
+					</button>
+					
+					<button 
 					  onClick={() => runTask(task.id)}
-					  // Blokujemy przycisk, jeśli trwa wysyłanie żądania LUB jeśli status z bazy to RUNNING
 					  disabled={runningTasks[task.id] || task.status === 'RUNNING'}
 					  className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:border disabled:border-slate-700/50 text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition shadow-sm flex items-center gap-1.5"
 					>
 					  {runningTasks[task.id] || task.status === 'RUNNING' ? (
-						<>
-						  <Loader2 className="w-3 h-3 animate-spin text-indigo-400" /> 
-						  {t('status_processing') || 'W trakcie...'}
-						</>
+						<><Loader2 className="w-3 h-3 animate-spin text-indigo-400" /> {t('status_processing') || 'W trakcie...'}</>
 					  ) : (
-						<>
-						  <Play className="w-3 h-3 fill-current flex-shrink-0" /> 
-						  {t('lbl_run') || 'Uruchom'}
-						</>
+						<><Play className="w-3 h-3 fill-current flex-shrink-0" /> {t('lbl_run') || 'Uruchom'}</>
 					  )}
 					</button>
-                  </div>
-                </div>
+				  </div>
+				</div>
 
               </div>
             ))}
