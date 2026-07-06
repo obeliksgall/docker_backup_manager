@@ -1,0 +1,46 @@
+{
+  "tasks": [
+    {
+      "name": "Kopia Dokumentów Lokalna",
+      "source": "/storage/dokumenty NOWE",
+      "destination": "/storage/backup_test_dokumenty",
+      "type": "local",
+      "mode": "mirror",
+      "schedule": "0 3 * * *",
+      "enabled": false,
+      "restore_enabled": false,
+      "exclude": [
+        ".DS_Store",
+        "tmp",
+        "*.tmp",
+        "/bananu/nieusuwaj.txt",
+        "ponczek/"
+      ],
+      "retention_days": 3,
+      "discord_webhook": "",
+      "ntfy_url": "",
+      "id": 1,
+      "status": "OK"
+    },
+    {
+      "name": "Kopia Zdjęć do Chmury",
+      "source": "/storage/zdjecia",
+      "destination": "ponczek:/backup/zdjecia123",
+      "type": "cloud",
+      "mode": "incremental",
+      "schedule": "0 4 * * *",
+      "enabled": false,
+      "restore_enabled": false,
+      "exclude": [
+        "*.tmp"
+      ],
+      "retention_days": 0,
+      "discord_webhook": "",
+      "ntfy_url": "",
+      "id": 2,
+      "status": "Błąd"
+    }
+  ],
+  "users": [
+  ]
+}

@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+body {
+  background-color: #020617; /* Odpowiednik bg-slate-950 w czystym CSS */
+  color: #f1f5f9;            /* Odpowiednik text-slate-100 */
+  min-height: 100vh;
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

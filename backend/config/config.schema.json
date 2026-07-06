@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BackupManagerConfig",
+  "type": "object",
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "integer"},
+          "name": {"type": "string"},
+          "source": {"type": "string"},
+          "destination": {"type": "string"},
+          "type": {"type": "string", "enum": ["local", "cloud"]},
+          "mode": {"type": "string", "enum": ["mirror", "copy", "move"]},
+          "schedule": {"type": "string"},
+          "enabled": {"type": "boolean"},
+          "restore_enabled": {"type": "boolean"},
+          "exclude": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "retention_days": {"type": "integer", "minimum": 0},
+          "status": {"type": ["string", "null"]},
+          "discord_webhook": {"type": ["string", "null"]},
+          "ntfy_url": {"type": ["string", "null"]}
+        },
+        "required": ["id", "name", "source", "destination", "type", "mode", "schedule", "enabled", "restore_enabled", "exclude", "retention_days"]
+      }
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "username": {"type": "string"},
+          "password": {"type": "string"}
+        },
+        "required": ["username", "password"]
+      }
+    }
+  },
+  "required": ["tasks"]
+}

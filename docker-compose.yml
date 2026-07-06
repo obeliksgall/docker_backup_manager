@@ -1,0 +1,39 @@
+services:
+  backup-backend:
+    build: ./backend
+    container_name: backup-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      # Mapujemy folder ./backend/config z hosta do /app/config w kontenerze (tam trzymasz config.json i rclone.conf)
+      - ./backend/config:/app/config
+      # Tworzymy i mapujemy dedykowany folder na logi zadań i aplikacji
+      - ./backend/logs:/app/logs
+      # Mapujemy folder ./data z głównego katalogu jako nasz storage na backupy
+      - ./data:/storage
+    environment:
+      - TZ=Europe/Warsaw
+      - API_KEY=${API_KEY}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - DISABLE_REGISTRATION=${DISABLE_REGISTRATION}
+      - JWT_SECRET=${JWT_SECRET}
+    command: sh -c "pip install pyjwt bcrypt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+      
+  backup-frontend:
+    # Zmieniamy z "image" na "build", aby Docker użył nowo utworzonego frontend/Dockerfile
+    build: ./frontend
+    container_name: backup-frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      # Kluczowy element: anonimowy wolumen, który chroni node_modules zainstalowane 
+      # wewnątrz kontenera przed nadpisaniem przez Twój (pusty) folder z komputera/NASa
+      - /app/node_modules
+    environment:
+      - TZ=Europe/Warsaw
+      - VITE_API_KEY=${API_KEY}
