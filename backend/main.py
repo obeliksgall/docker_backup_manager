@@ -19,8 +19,6 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 
-from pydantic import BaseModel
-
 app = FastAPI(title="Docker Backup Manager API")
 
 # Pobieramy nowe zmienne z .env
@@ -68,7 +66,6 @@ def verify_api_key(api_key: str = Depends(api_key_header)):
 
 # --- POPRAWKA: KONFIGURACJA KOLEJKOWANIA ZADAŃ NA NAS ---
 # max_workers=1 oznacza wykonywanie zadań jedno po drugim. 
-# Zmień na 3, jeśli chcesz pozwolić na maksymalnie 3 zadania jednocześnie.
 executors = {
     'default': ThreadPoolExecutor(max_workers=1)
 }
@@ -239,9 +236,8 @@ def execute_backup_process(task: dict):
         else:
             cmd.append("copy")
             
-        # --- DODAJ TE FLAGI OPTYMALIZUJĄCE RAM ---
-        #cmd.extend(["--buffer-size=16M", "--transfers=2"])
-        # ----------------------------------------
+        # Ograniczenie zużycia pamięci RAM dla rclone
+        cmd.extend(["--buffer-size=16M", "--transfers=2"])
             
         for ex in task.get("exclude", []):
             if ex: cmd.extend(["--exclude", ex])
@@ -250,7 +246,8 @@ def execute_backup_process(task: dict):
     else:
         return
 
-try:
+    # --- POPRAWIONE WCIĘCIE BLOKU TRY-EXCEPT ---
+    try:
         with open(log_file_path, "w", encoding="utf-8") as log_file:
             log_file.write(f"=== START BACKUP ({task['type'].upper()}): {task['name']} ===\n")
             log_file.write(f"Komenda: {' '.join(cmd)}\n\n")
@@ -401,7 +398,7 @@ def delete_task(task_id: int):
     log_to_app(f"Usunięto zadanie ID {task_id}.")
     return {"message": "Zadanie usunięte"}
 
-# --- POPRAWKA: RĘCZNE WYWOŁANIE TRAFIA DO KOLEJKI SCHEDULERA (ThreadPoolExecutor) ---
+# --- RĘCZNE WYWOŁANIE TRAFIA DO KOLEJKI SCHEDULERA (ThreadPoolExecutor) ---
 @app.post("/api/tasks/{task_id}/run", dependencies=[Depends(verify_api_key)])
 def run_task(task_id: int):
     config = get_all_tasks()
@@ -418,7 +415,7 @@ def run_task(task_id: int):
     log_to_app(f"Ręczne wywołanie zadania ID {task_id} dodane do kolejki wątków.")
     return {"message": "Zadanie przekazane do kolejki wykonawczej (wykonywanie jedno po drugim)."}
 
-# --- POPRAWKA: RĘCZNE WYWOŁANIE RESTORE TRAFIA DO TEJ SAMEJ KOLEJKI ---
+# --- RĘCZNE WYWOŁANIE RESTORE TRAFIA DO TEJ SAMEJ KOLEJKI ---
 @app.post("/api/tasks/{task_id}/restore", dependencies=[Depends(verify_api_key)])
 def restore_task(task_id: int):
     config = get_all_tasks()
@@ -450,7 +447,7 @@ def get_task_logs(task_id: int):
         return {"logs": "Brak logów dla tego zadania. Nie zostało jeszcze uruchomione."}
         
     try:
-        # Pobieramy listę wszystkich plików .log w folderze zadania
+        # Pobieramy lista wszystkich plików .log w folderze zadania
         log_files = [os.path.join(task_log_dir, f) for f in os.listdir(task_log_dir) if f.endswith(".log")]
         if not log_files:
             return {"logs": "Brak plików logów w katalogu zadania."}
@@ -461,7 +458,6 @@ def get_task_logs(task_id: int):
         # Odczytujemy ostatnie 200 linii logu, żeby nie przeciążyć przeglądarki olbrzymim plikiem
         with open(latest_log_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
-            # Wycinamy ostatnie 200 linii (możesz zwiększyć wg uznania)
             last_lines = lines[-200:] if len(lines) > 200 else lines
             log_content = "".join(last_lines)
             
