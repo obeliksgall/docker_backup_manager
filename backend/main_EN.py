@@ -188,6 +188,14 @@ def clean_all_trash_folders_cron():
 
 # --- BACKUP ENGINE ---
 def execute_backup_process(task: dict):
+    # 1. NA SAMYM POCZĄTKU: Ustawiamy status zadania na RUNNING w pliku config.json
+    config = get_all_tasks()
+    for t in config.get("tasks", []):
+        if t["id"] == task["id"]:
+            t["status"] = "RUNNING"
+            break
+    save_config(config)
+
     task_name_slug = task["name"].replace(" ", "_").lower()
     task_log_dir = os.path.join(LOGS_BASE_DIR, task_name_slug)
     os.makedirs(task_log_dir, exist_ok=True)
@@ -244,6 +252,7 @@ def execute_backup_process(task: dict):
             
         final_status = "OK" if process.returncode == 0 else "Błąd"
         
+        # 2. NA KOŃCU: Zmieniamy status z RUNNING na finalny status po zakończeniu procesu
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task["id"]:
@@ -257,6 +266,13 @@ def execute_backup_process(task: dict):
         if final_status == "OK":
             clean_old_trash_folders(task)
     except Exception as e:
+        # W razie awarii aplikacji też musimy zdjąć status RUNNING
+        config = get_all_tasks()
+        for t in config.get("tasks", []):
+            if t["id"] == task["id"]:
+                t["status"] = "Błąd"
+                break
+        save_config(config)
         log_to_app(f"Critical error in task {task['name']}: {str(e)}")
 
 # --- RESTORE ENGINE ---
