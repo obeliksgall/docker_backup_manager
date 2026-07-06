@@ -66,7 +66,6 @@ def verify_api_key(api_key: str = Depends(api_key_header)):
 
 # --- TASK QUEUING CONFIGURATION FOR NAS ---
 # max_workers=1 forces tasks to execute sequentially (one after another).
-# Change to 3 if you want to allow up to 3 concurrent tasks.
 executors = {
     'default': ThreadPoolExecutor(max_workers=1)
 }
@@ -147,7 +146,7 @@ def clean_old_trash_folders(task: dict):
 
     log_to_app(f"Started trash purging for task '{task['name']}' (Retention limit: {retention_limit}).")
 
-  if task["type"] == "local":
+    if task["type"] == "local":
         trash_base = task["destination"].rstrip("/") + "-trash"
         if not os.path.exists(trash_base):
             return
@@ -188,7 +187,7 @@ def clean_all_trash_folders_cron():
 
 # --- BACKUP ENGINE ---
 def execute_backup_process(task: dict):
-    # 1. NA SAMYM POCZĄTKU: Ustawiamy status zadania na RUNNING w pliku config.json
+    # 1. AT THE VERY START: Set status to RUNNING inside config.json
     config = get_all_tasks()
     for t in config.get("tasks", []):
         if t["id"] == task["id"]:
@@ -237,6 +236,9 @@ def execute_backup_process(task: dict):
         else:
             cmd.append("copy")
             
+        # RAM optimization flags for rclone on NAS
+        cmd.extend(["--buffer-size=16M", "--transfers=2"])
+            
         for ex in task.get("exclude", []):
             if ex: cmd.extend(["--exclude", ex])
         cmd.extend([task["source"], task["destination"], "-v"])
@@ -244,6 +246,7 @@ def execute_backup_process(task: dict):
     else:
         return
 
+    # --- PERFECTLY ALIGNED TRY-EXCEPT BLOCK ---
     try:
         with open(log_file_path, "w", encoding="utf-8") as log_file:
             log_file.write(f"=== START BACKUP ({task['type'].upper()}): {task['name']} ===\n")
@@ -252,7 +255,7 @@ def execute_backup_process(task: dict):
             
         final_status = "OK" if process.returncode == 0 else "Błąd"
         
-        # 2. NA KOŃCU: Zmieniamy status z RUNNING na finalny status po zakończeniu procesu
+        # 2. AT THE END: Revert RUNNING back to the final execution status
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task["id"]:
@@ -266,7 +269,7 @@ def execute_backup_process(task: dict):
         if final_status == "OK":
             clean_old_trash_folders(task)
     except Exception as e:
-        # W razie awarii aplikacji też musimy zdjąć status RUNNING
+        # Emergency fallbacks to remove the RUNNING lock on system failures
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task["id"]:
