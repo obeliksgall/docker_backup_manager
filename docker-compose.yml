@@ -20,6 +20,13 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - DISABLE_REGISTRATION=${DISABLE_REGISTRATION}
       - JWT_SECRET=${JWT_SECRET}
+    # OGRANICZENIE ZASOBÓW DLA BACKENDU (FastAPI + Rclone)
+    #deploy:
+    #  resources:
+    #    limits:
+    #      memory: 512M  # Maksymalny twardy limit RAM (np. 512 Megabajtów)
+    #    reservations:
+    #      memory: 128M  # Pamięć zarezerwowana na start
     command: sh -c "pip install pyjwt bcrypt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
       
   backup-frontend:
@@ -37,3 +44,8 @@ services:
     environment:
       - TZ=Europe/Warsaw
       - VITE_API_KEY=${API_KEY}
+    # OGRANICZENIE ZASOBÓW DLA FRONTENDU (Vite / Node)
+    #deploy:
+    #  resources:
+    #    limits:
+    #      memory: 256M
