@@ -13,6 +13,10 @@ services:
       - ./backend/logs:/app/logs
       # Mapujemy folder ./data z głównego katalogu jako nasz storage na backupy
       - ./data:/storage
+      # Mapujesz foldery z różnych miejsc NAS-a do jednego wspólnego punktu w kontenerze:
+      #- /vol1/dane1:/storage/ZBIORCZY/dane1
+      #- /vol1/dane2:/storage/ZBIORCZY/dane2
+      #- /jakis_inny_dysk/dane3:/storage/ZBIORCZY/dane3
     environment:
       - TZ=Europe/Warsaw
       - API_KEY=${API_KEY}
@@ -21,12 +25,12 @@ services:
       - DISABLE_REGISTRATION=${DISABLE_REGISTRATION}
       - JWT_SECRET=${JWT_SECRET}
     # OGRANICZENIE ZASOBÓW DLA BACKENDU (FastAPI + Rclone)
-    #deploy:
-    #  resources:
-    #    limits:
-    #      memory: 512M  # Maksymalny twardy limit RAM (np. 512 Megabajtów)
-    #    reservations:
-    #      memory: 128M  # Pamięć zarezerwowana na start
+    deploy:
+      resources:
+        limits:
+          memory: 768M  # Maksymalny twardy limit RAM (np. 512 Megabajtów)
+        reservations:
+          memory: 128M  # Pamięć zarezerwowana na start
     command: sh -c "pip install pyjwt bcrypt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
       
   backup-frontend:
@@ -45,7 +49,7 @@ services:
       - TZ=Europe/Warsaw
       - VITE_API_KEY=${API_KEY}
     # OGRANICZENIE ZASOBÓW DLA FRONTENDU (Vite / Node)
-    #deploy:
-    #  resources:
-    #    limits:
-    #      memory: 256M
+    deploy:
+      resources:
+        limits:
+          memory: 384M
