@@ -90,6 +90,7 @@ const resources = {
 	  "tooltip_logs": "Zobacz najnowsze logi",
 	  "tooltip_edit": "Edytuj zadanie",
 	  "tooltip_delete": "Usuń zadanie",
+	  "status_processing": "W trakcie...",
     }
   },
   en: {
@@ -180,6 +181,7 @@ const resources = {
 	  "tooltip_logs": "View latest logs",
 	  "tooltip_edit": "Edit task",
 	  "tooltip_delete": "Delete task",
+	  "status_processing": "Processing...",
     }
   }
 };

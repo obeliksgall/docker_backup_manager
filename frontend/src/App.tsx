@@ -364,25 +364,40 @@ export default function App() {
                 {/* Stopka karty z wykonaniem zadania */}
                 <div className="border-t border-slate-800/60 pt-4 mt-2 flex justify-between items-center gap-2 select-none">
                   <div className="flex items-center gap-1.5 text-xs">
-                    {task.status === 'OK' || task.status === 'SUKCES' ? (
-                      <span className="text-emerald-400 flex items-center gap-1 font-semibold"><CheckCircle className="w-3.5 h-3.5" /> {t('status_success') || 'Sukces'}</span>
-                    ) : task.status ? (
-                      <span className="text-red-400 flex items-center gap-1 font-semibold"><XCircle className="w-3.5 h-3.5" /> {t('status_error') || 'Błąd'}</span>
-                    ) : (
-                      <span className="text-slate-500 font-medium">{t('status_never') || 'Nieuruchamiane'}</span>
-                    )}
-                  </div>
+					  {task.status === 'RUNNING' ? (
+						<span className="text-indigo-400 flex items-center gap-1 font-semibold animate-pulse">
+						  <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('status_processing') || 'W trakcie...'}
+						</span>
+					  ) : task.status === 'OK' || task.status === 'SUKCES' ? (
+						<span className="text-emerald-400 flex items-center gap-1 font-semibold"><CheckCircle className="w-3.5 h-3.5" /> {t('status_success') || 'Sukces'}</span>
+					  ) : task.status ? (
+						<span className="text-red-400 flex items-center gap-1 font-semibold"><XCircle className="w-3.5 h-3.5" /> {t('status_error') || 'Błąd'}</span>
+					  ) : (
+						<span className="text-slate-500 font-medium">{t('status_never') || 'Nieuruchamiane'}</span>
+					  )}
+					</div>
                   <div className="flex gap-2">
                     <button onClick={() => handleRestore(task)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-700/40">
                       Restore
                     </button>
                     <button 
-                      onClick={() => runTask(task.id)}
-                      disabled={runningTasks[task.id]}
-                      className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition shadow-sm flex items-center gap-1.5"
-                    >
-                      {runningTasks[task.id] ? <><Loader2 className="w-3 h-3 animate-spin" /> ...</> : <><Play className="w-3 h-3 fill-current flex-shrink-0" /> {t('lbl_run') || 'Uruchom'}</>}
-                    </button>
+					  onClick={() => runTask(task.id)}
+					  // Blokujemy przycisk, jeśli trwa wysyłanie żądania LUB jeśli status z bazy to RUNNING
+					  disabled={runningTasks[task.id] || task.status === 'RUNNING'}
+					  className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:border disabled:border-slate-700/50 text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition shadow-sm flex items-center gap-1.5"
+					>
+					  {runningTasks[task.id] || task.status === 'RUNNING' ? (
+						<>
+						  <Loader2 className="w-3 h-3 animate-spin text-indigo-400" /> 
+						  {t('status_processing') || 'W trakcie...'}
+						</>
+					  ) : (
+						<>
+						  <Play className="w-3 h-3 fill-current flex-shrink-0" /> 
+						  {t('lbl_run') || 'Uruchom'}
+						</>
+					  )}
+					</button>
                   </div>
                 </div>
 
