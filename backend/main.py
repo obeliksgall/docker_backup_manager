@@ -6,6 +6,10 @@ import urllib.request
 import bcrypt
 import jwt
 
+import time                              # <-- WYMAGANE dla time.time()
+import logging                           # <-- WYMAGANE dla logging
+from logging.handlers import RotatingFileHandler  # <-- WYMAGANE dla rotacji logów
+
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, Depends
 from pydantic import BaseModel
@@ -87,14 +91,32 @@ class TaskSchema(BaseModel):
     ntfy_url: Optional[str] = None
 
 # --- FUNKCJE POMOCNICZE ---
+#def log_to_app(message: str):
+#    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#    
+#    # POPRAWKA: Automatycznie twórz folder logs, jeśli nie istnieje
+#    os.makedirs(os.path.dirname(APP_LOG_PATH), exist_ok=True)
+#    
+#    with open(APP_LOG_PATH, "a", encoding="utf-8") as f:
+#        f.write(f"[{timestamp}] {message}\n")
+
 def log_to_app(message: str):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # POPRAWKA: Automatycznie twórz folder logs, jeśli nie istnieje
     os.makedirs(os.path.dirname(APP_LOG_PATH), exist_ok=True)
     
-    with open(APP_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(f"[{timestamp}] {message}\n")
+    # Tworzymy logger dedykowany do rotacji
+    logger = logging.getLogger("AppLogger")
+    
+    # Zapobiegamy dublowaniu się handlerów przy wielokrotnym wywołaniu funkcji
+    if not logger.handlers:
+        handler = RotatingFileHandler(APP_LOG_PATH, maxBytes=5*1024*1024, backupCount=7, encoding="utf-8")
+        formatter = logging.Formatter('[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    
+    # Zapisujemy wiadomość przez rotujący handler (wytnie datę automatycznie wg formatera)
+    logger.info(message)
 
 def send_notification(task_name: str, status: str, discord_url: str = None, ntfy_url: str = None):
     emoji = "✅" if status in ["OK", "SUKCES"] else "❌"
@@ -178,12 +200,37 @@ def clean_old_trash_folders(task: dict):
         except Exception as e:
             log_to_app(f"Błąd czyszczenia kosza w chmurze: {str(e)}")
 
+#def clean_all_trash_folders_cron():
+#    log_to_app("Harmonogram: Uruchomiono nocne czyszczenie kosza dla wszystkich zadań.")
+#    config = get_all_tasks()
+#    for task in config.get("tasks", []):
+#        if task.get("enabled", True) and task.get("retention_days", 0) > 0:
+#            clean_old_trash_folders(task)
+
 def clean_all_trash_folders_cron():
     log_to_app("Harmonogram: Uruchomiono nocne czyszczenie kosza dla wszystkich zadań.")
     config = get_all_tasks()
     for task in config.get("tasks", []):
         if task.get("enabled", True) and task.get("retention_days", 0) > 0:
             clean_old_trash_folders(task)
+            
+    # --- NOWA SEKCJA: CZYSZCZENIE LOGÓW STARSZYCH NIŻ 30/365 DNI ---
+    log_to_app("Harmonogram: Uruchomiono czyszczenie logów starszych niż 30/365 dni.")
+    now = time.time()
+    cutoff = now - (365 * 24 * 60 * 60) # 30/365 dni w sekundach
+    
+    if os.path.exists(LOGS_BASE_DIR):
+        for root, dirs, files in os.walk(LOGS_BASE_DIR):
+            for file in files:
+                if file.endswith(".log"):
+                    file_path = os.path.join(root, file)
+                    # Jeśli plik był modyfikowany dawniej niż 30 dni temu - usuń go
+                    if os.path.getmtime(file_path) < cutoff:
+                        try:
+                            os.remove(file_path)
+                            log_to_app(f"Rotacja logów: Usunięto stary plik logu: {file}")
+                        except Exception as e:
+                            pass
 
 # --- SILNIK BACKUPU ---
 def execute_backup_process(task: dict):
