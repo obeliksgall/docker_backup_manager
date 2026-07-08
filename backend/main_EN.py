@@ -401,8 +401,11 @@ def create_task(task: TaskSchema):
     existing_ids = [t["id"] for t in config.get("tasks", [])]
     new_id = max(existing_ids) + 1 if existing_ids else 1
     
-    if not os.path.exists(task.source):
+    # Walidacja: Sprawdzamy dysk tylko dla lokalnych kopii
+    if task.type == "local" and not os.path.exists(task.source):
         raise HTTPException(status_code=400, detail=f"Directory missing: {task.source}")
+    elif task.type == "cloud" and not os.path.exists(task.destination) and not task.destination.startswith("http"):
+        os.makedirs(task.destination, exist_ok=True)
         
     new_task = task.dict()
     new_task["id"] = new_id
@@ -421,7 +424,12 @@ def update_task(task_id: int, fields: TaskSchema):
     idx = next((i for i, t in enumerate(tasks) if t["id"] == task_id), None)
     
     if idx is None: raise HTTPException(status_code=404, detail="Task not found")
-    if not os.path.exists(fields.source): raise HTTPException(status_code=400, detail="Source directory missing")
+    
+    # Walidacja: Sprawdzamy dysk tylko dla lokalnych kopii
+    if fields.type == "local" and not os.path.exists(fields.source):
+        raise HTTPException(status_code=400, detail="Source directory missing")
+    elif fields.type == "cloud" and not os.path.exists(fields.destination):
+        os.makedirs(fields.destination, exist_ok=True)
     
     updated_task = fields.dict()
     updated_task["id"] = task_id
