@@ -21,6 +21,7 @@ interface Task {
   enabled: boolean;
   restore_enabled: boolean;
   exclude: string[];
+  custom_flags: string[];
   retention_days: number;
   status?: string;
   discord_webhook?: string;
@@ -143,6 +144,23 @@ export default function App() {
     }
   };
 
+  // --- NOWA FUNKCJA: ZATRZYMYWANIE PROCESU BACKUPU ---
+  const stopTask = async (id: number) => {
+    if (!confirm(t('stop_confirm_msg') || "Czy na pewno chcesz wymusić zatrzymanie tego zadania?")) return;
+    try {
+      const response = await fetch(`${API_URL}/api/tasks/${id}/stop`, {
+        method: 'POST',
+        headers: getHeaders()
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Nie udało się zatrzymać zadania.");
+      alert(data.message);
+      fetchTasks();
+    } catch (err: any) {
+      alert(`Błąd zatrzymywania: ${err.message}`);
+    }
+  };
+
   const handleSaveTask = async (taskData: any) => {
     const isEdit = !!taskData.id;
     const url = isEdit ? `${API_URL}/api/tasks/${taskData.id}` : `${API_URL}/api/tasks`;
@@ -203,36 +221,22 @@ export default function App() {
     }
   };
 
-  // ZNAJDŹ TEN BLOK:
-// useEffect(() => {
-//   if (token) {
-//     fetchTasks();
-//   }
-// }, [token]);
+  useEffect(() => {
+    if (!token) return;
 
-// I PODMIEŃ NA TEN INTELIGENTNY MECHANIZM:
-useEffect(() => {
-  if (!token) return;
+    fetchTasks();
 
-  // Pierwsze, natychmiastowe pobranie zadań po wejściu na stronę
-  fetchTasks();
+    const interval = setInterval(() => {
+      const hasRunningTasks = tasks.some(task => task.status === 'RUNNING');
+      
+      if (hasRunningTasks) {
+        fetchTasks();
+      }
+    }, 10000);
 
-  // Uruchamiamy cykliczny interwał sprawdzający (co 5/10 sekund)
-  const interval = setInterval(() => {
-    // Sprawdzamy, czy w aktualnym stanie aplikacji jakiekolwiek zadanie ma status wykonywania
-    const hasRunningTasks = tasks.some(task => task.status === 'RUNNING');
-    
-    // Jeśli coś się wykonuje, odświeżamy dane z API automatycznie w tle
-    if (hasRunningTasks) {
-      fetchTasks();
-    }
-  }, 10000); // 5000 ms = 5 sekund // 10000 ms = 10 sekund
+    return () => clearInterval(interval);
+  }, [token, tasks]);
 
-  // Czyszczenie interwału przy odmontowywaniu komponentu, żeby nie marnować zasobów
-  return () => clearInterval(interval);
-}, [token, tasks]); // Ważne: dodajemy 'tasks' do tablicy zależności, aby interwał widział aktualny stan
-
-  // JEŚLI NIE MA TOKENU - WYŚWIETLAMY WPROST EKRAN LOGOWANIA
   if (!token) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
@@ -240,20 +244,16 @@ useEffect(() => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 antialiased selection:bg-indigo-500/30">
       
-      {/* GÓRNY PASEK NAWIGACYJNY (NAVBAR) */}
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           
-          {/* Logo i Tytuł */}
           <div className="flex items-center gap-2.5 select-none">
             <Database className="w-6 h-6 text-indigo-500" />
             <span className="font-bold text-lg tracking-tight text-white">Docker Backup Manager</span>
           </div>
 
-          {/* Prawa strona Navbaru: Język, Profil, Akcje, Wylogowanie */}
           <div className="flex items-center gap-4">
             
-            {/* PRZEŁĄCZNIK JĘZYKA W PANELU GŁÓWNYM */}
             <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-1 text-xs">
               <Globe className="w-3.5 h-3.5 text-slate-500 ml-1" />
               <button 
@@ -272,13 +272,11 @@ useEffect(() => {
               </button>
             </div>
 
-            {/* Informacja o użytkowniku */}
             <div className="text-right hidden sm:block border-l border-slate-800 pl-4 select-none">
               <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">{t('logged_in_as')}</p>
               <p className="text-sm font-medium text-slate-200">{username}</p>
             </div>
 
-            {/* Przycisk Wyloguj */}
             <button 
               onClick={handleLogout} 
               className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl transition"
@@ -291,10 +289,8 @@ useEffect(() => {
         </div>
       </header>
 
-      {/* GŁÓWNA ZAWARTOŚĆ PANELU */}
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         
-        {/* Nagłówek i Akcje główne */}
         <div className="flex items-center justify-between border-b border-slate-900 pb-4">
           <h2 className="text-xl font-bold text-white tracking-tight">{t('dashboard_title') || 'Zadania automatyczne'}</h2>
           <div className="flex gap-2">
@@ -313,7 +309,6 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* STATUSY BŁĘDU API */}
         {error && (
           <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-center gap-3">
             <XCircle className="w-5 h-5 flex-shrink-0" />
@@ -321,7 +316,6 @@ useEffect(() => {
           </div>
         )}
 
-        {/* LISTA KART ZADANIA */}
         {loading && tasks.length === 0 ? (
           <div className="text-center py-12 text-slate-400 font-medium flex items-center justify-center gap-2">
             <Loader2 className="w-5 h-5 animate-spin text-indigo-500" /> {t('loading_text')}
@@ -335,32 +329,29 @@ useEffect(() => {
             {tasks.map((task) => (
               <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700/80 transition flex flex-col justify-between shadow-xl relative group">
                 
-                {/* Przyciski operacyjne w rogu karty */}
-				<div className="absolute top-5 right-5 flex gap-1 opacity-40 group-hover:opacity-100 transition">
-				  <button onClick={() => fetchLogs(task)} className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition" title={t('tooltip_logs') || 'Logi'}>
-					<FileText className="w-4 h-4" />
-				  </button>
-				  
-				  {/* EDYCJA - zablokowana podczas RUNNING */}
-				  <button 
-					onClick={() => { if(task.status !== 'RUNNING') { setSelectedTask(task); setIsModalOpen(true); } }} 
-					disabled={task.status === 'RUNNING'}
-					className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded-lg transition disabled:opacity-30 disabled:hover:text-slate-400 disabled:cursor-not-allowed" 
-					title={task.status === 'RUNNING' ? '' : (t('tooltip_edit') || 'Edytuj')}
-				  >
-					<Edit2 className="w-4 h-4" />
-				  </button>
-				  
-				  {/* USUWANIE - zablokowane podczas RUNNING */}
-				  <button 
-					onClick={() => { if(task.status !== 'RUNNING') handleDeleteTask(task.id, task.name); }} 
-					disabled={task.status === 'RUNNING'}
-					className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-red-400 rounded-lg transition disabled:opacity-30 disabled:hover:text-slate-400 disabled:cursor-not-allowed" 
-					title={task.status === 'RUNNING' ? '' : (t('tooltip_delete') || 'Usuń')}
-				  >
-					<Trash2 className="w-4 h-4" />
-				  </button>
-				</div>
+                <div className="absolute top-5 right-5 flex gap-1 opacity-40 group-hover:opacity-100 transition">
+                  <button onClick={() => fetchLogs(task)} className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition" title={t('tooltip_logs') || 'Logi'}>
+                    <FileText className="w-4 h-4" />
+                  </button>
+                  
+                  <button 
+                    onClick={() => { if(task.status !== 'RUNNING') { setSelectedTask(task); setIsModalOpen(true); } }} 
+                    disabled={task.status === 'RUNNING'}
+                    className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded-lg transition disabled:opacity-30 disabled:hover:text-slate-400 disabled:cursor-not-allowed" 
+                    title={task.status === 'RUNNING' ? '' : (t('tooltip_edit') || 'Edytuj')}
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  
+                  <button 
+                    onClick={() => { if(task.status !== 'RUNNING') handleDeleteTask(task.id, task.name); }} 
+                    disabled={task.status === 'RUNNING'}
+                    className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-red-400 rounded-lg transition disabled:opacity-30 disabled:hover:text-slate-400 disabled:cursor-not-allowed" 
+                    title={task.status === 'RUNNING' ? '' : (t('tooltip_delete') || 'Usuń')}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
 
                 <div>
                   <h3 className="font-bold text-base text-white truncate max-w-[180px] mb-3">{task.name}</h3>
@@ -386,44 +377,54 @@ useEffect(() => {
                   </div>
                 </div>
 
-                {/* Stopka karty z wykonaniem zadania */}
-				<div className="border-t border-slate-800/60 pt-4 mt-2 flex justify-between items-center gap-2 select-none">
-				  <div className="flex items-center gap-1.5 text-xs">
-					{task.status === 'RUNNING' ? (
-					  <span className="text-indigo-400 flex items-center gap-1 font-semibold animate-pulse"><Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('status_processing') || 'W trakcie...'}</span>
-					) : task.status === 'OK' || task.status === 'SUKCES' ? (
-					  <span className="text-emerald-400 flex items-center gap-1 font-semibold"><CheckCircle className="w-3.5 h-3.5" /> {t('status_success') || 'Sukces'}</span>
-					) : task.status ? (
-					  <span className="text-red-400 flex items-center gap-1 font-semibold"><XCircle className="w-3.5 h-3.5" /> {t('status_error') || 'Błąd'}</span>
-					) : (
-					  <span className="text-slate-500 font-medium">{t('status_never') || 'Nieuruchamiane'}</span>
-					)}
-				  </div>
-				  
-				  <div className="flex gap-2">
-					{/* PRZYCISK RESTORE – TERAZ ZABEZPIECZONY */}
-					<button 
-					  onClick={() => handleRestore(task)} 
-					  // Blokujemy, jeśli stan sieci wysyła żądanie LUB jeśli status z backendu to RUNNING
-					  disabled={runningTasks[task.id] || task.status === 'RUNNING'}
-					  className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 disabled:border-slate-800/40 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-700/40 cursor-pointer disabled:cursor-not-allowed"
-					>
-					  Restore
-					</button>
-					
-					<button 
-					  onClick={() => runTask(task.id)}
-					  disabled={runningTasks[task.id] || task.status === 'RUNNING'}
-					  className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:border disabled:border-slate-700/50 text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition shadow-sm flex items-center gap-1.5"
-					>
-					  {runningTasks[task.id] || task.status === 'RUNNING' ? (
-						<><Loader2 className="w-3 h-3 animate-spin text-indigo-400" /> {t('status_processing') || 'W trakcie...'}</>
-					  ) : (
-						<><Play className="w-3 h-3 fill-current flex-shrink-0" /> {t('lbl_run') || 'Uruchom'}</>
-					  )}
-					</button>
-				  </div>
-				</div>
+                {/* Stopka karty z dynamicznym przyciskiem STOP */}
+                <div className="border-t border-slate-800/60 pt-4 mt-2 flex justify-between items-center gap-2 select-none">
+                  <div className="flex items-center gap-1.5 text-xs">
+                    {task.status === 'RUNNING' ? (
+                      <span className="text-indigo-400 flex items-center gap-1 font-semibold animate-pulse"><Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('status_processing') || 'W trakcie...'}</span>
+                    ) : task.status === 'OK' || task.status === 'SUKCES' ? (
+                      <span className="text-emerald-400 flex items-center gap-1 font-semibold"><CheckCircle className="w-3.5 h-3.5" /> {t('status_success') || 'Sukces'}</span>
+                    ) : task.status ? (
+                      <span className="text-red-400 flex items-center gap-1 font-semibold"><XCircle className="w-3.5 h-3.5" /> {t('status_error') || 'Błąd'}</span>
+                    ) : (
+                      <span className="text-slate-500 font-medium">{t('status_never') || 'Nieuruchamiane'}</span>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    {task.status === 'RUNNING' ? (
+                      /* JEŚLI ZADANIE DZIAŁA -> POKAZUJEMY CZERWONY PRZYCISK STOP */
+                      <button 
+                        onClick={() => stopTask(task.id)} 
+                        className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1 shadow-sm shadow-red-600/10 cursor-pointer"
+                        title="Zatrzymaj proces rclone/rsync"
+                      >
+                        <XCircle className="w-3 h-3" /> Stop
+                      </button>
+                    ) : (
+                      /* JEŚLI ZADANIE NIE DZIAŁA -> STANDARDOWY PRZYCISK RESTORE */
+                      <button 
+                        onClick={() => handleRestore(task)} 
+                        disabled={runningTasks[task.id]}
+                        className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 disabled:border-slate-800/40 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-700/40 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        Restore
+                      </button>
+                    )}
+                    
+                    <button 
+                      onClick={() => runTask(task.id)}
+                      disabled={runningTasks[task.id] || task.status === 'RUNNING'}
+                      className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:border disabled:border-slate-700/50 text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition shadow-sm flex items-center gap-1.5"
+                    >
+                      {runningTasks[task.id] || task.status === 'RUNNING' ? (
+                        <><Loader2 className="w-3 h-3 animate-spin text-indigo-400" /> {t('status_processing') || 'W trakcie...'}</>
+                      ) : (
+                        <><Play className="w-3 h-3 fill-current flex-shrink-0" /> {t('lbl_run') || 'Uruchom'}</>
+                      )}
+                    </button>
+                  </div>
+                </div>
 
               </div>
             ))}

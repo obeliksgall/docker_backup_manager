@@ -14,6 +14,7 @@ interface Task {
   enabled: boolean;
   restore_enabled: boolean;
   exclude: string[];
+  custom_flags: string[]; // <-- NOWE POLE W INTERFEJSIE
   retention_days: number;
   discord_webhook?: string;
   ntfy_url?: string;
@@ -32,10 +33,11 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
   const [formData, setFormData] = useState<Task>({
     name: '', source: '', destination: '', type: 'local', mode: 'mirror',
     schedule: '0 3 * * *', enabled: true, restore_enabled: false, exclude: [],
-    retention_days: 0, discord_webhook: '', ntfy_url: ''
+    custom_flags: [], retention_days: 0, discord_webhook: '', ntfy_url: ''
   });
 
   const [excludeInput, setExcludeInput] = useState('');
+  const [customFlagsInput, setCustomFlagsInput] = useState(''); // <-- STAN DLA INPUTU FLAG
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -47,16 +49,19 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
       setFormData({
         ...task,
         discord_webhook: task.discord_webhook || '',
-        ntfy_url: task.ntfy_url || ''
+        ntfy_url: task.ntfy_url || '',
+        custom_flags: task.custom_flags || []
       });
       setExcludeInput(task.exclude ? task.exclude.join(', ') : '');
+      setCustomFlagsInput(task.custom_flags ? task.custom_flags.join(', ') : ''); // <-- ŁADOWANIE FLAG DO EDYCJI
     } else {
       setFormData({
         name: '', source: '', destination: '', type: 'local', mode: 'mirror',
         schedule: '0 3 * * *', enabled: true, restore_enabled: false, exclude: [],
-        retention_days: 0, discord_webhook: '', ntfy_url: ''
+        custom_flags: [], retention_days: 0, discord_webhook: '', ntfy_url: ''
       });
       setExcludeInput('');
+      setCustomFlagsInput(''); // <-- CZYSZCZENIE INPUTU
     }
   }, [task, isOpen]);
 
@@ -74,7 +79,7 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
 
   const openBrowser = (target: 'source' | 'destination', titleKey: string) => {
     setBrowserTarget(target);
-    setBrowserTitle(t(titleKey)); // Wyciągamy przetłumaczony tytuł ze słownika
+    setBrowserTitle(t(titleKey));
     setIsBrowserOpen(true);
   };
 
@@ -88,14 +93,17 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    
+    // Konwersja inputów tekstowych na tablice stringów
     const excludeArray = excludeInput.split(',').map(item => item.trim()).filter(item => item !== '');
+    const flagsArray = customFlagsInput.split(',').map(item => item.trim()).filter(item => item !== '');
 
     try {
-      await onSave({ ...formData, exclude: excludeArray });
+      await onSave({ ...formData, exclude: excludeArray, custom_flags: flagsArray });
       onClose();
     } catch (err) {
-      // ewentualny log błędu
-    } finally {                  // <-- CZYSTE 'finally'
+      // log błędu
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -229,6 +237,18 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500 transition"
             />
           </div>
+
+          {/* DYNAMICZNE POLE DLA FLAG RCLONE PER ZADANIE */}
+          {formData.type === 'cloud' && (
+            <div>
+              <label className="block text-slate-400 font-medium mb-1.5">Custom Rclone Flags (rozdziel przecinkami)</label>
+              <input
+                type="text" value={customFlagsInput} onChange={(e) => setCustomFlagsInput(e.target.value)}
+                placeholder="np. --buffer-size=32M, --transfers=4, --bwlimit=10M"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500 transition font-mono text-xs text-indigo-400"
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800/60">
             <div>

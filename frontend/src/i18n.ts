@@ -46,6 +46,7 @@ const resources = {
       "btn_save_changes": "Zapisz zmiany",
       "saving_text": "Zapisywanie...",
       "error_fetch_logs": "Błąd pobierania logów",
+	  "stop_confirm_msg": "Czy na pewno chcesz wymusić natychmiastowe zatrzymanie tego zadania?", // <-- DODAJ TĘ LINIĘ
 
       // TaskModal Specific
       "modal_edit_title": "Edycja Zadania Backup",
@@ -137,6 +138,7 @@ const resources = {
       "btn_save_changes": "Save Changes",
       "saving_text": "Saving...",
       "error_fetch_logs": "Error retrieving logs",
+	  "stop_confirm_msg": "Are you sure you want to forcefully terminate this running task?", // <-- DODAJ TĘ LINIĘ
 
       // TaskModal Specific
       "modal_edit_title": "Edit Backup Task",
