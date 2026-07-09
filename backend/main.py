@@ -6,8 +6,8 @@ import urllib.request
 import bcrypt
 import jwt
 
-import time                              # <-- WYMAGANE dla time.time()
-import logging                           # <-- WYMAGANE dla logging
+import time                                 # <-- WYMAGANE dla time.time()
+import logging                              # <-- WYMAGANE dla logging
 from logging.handlers import RotatingFileHandler  # <-- WYMAGANE dla rotacji logów
 
 from datetime import datetime
@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Docker Backup Manager API")
 
-# Pobieramy nowe zmienne z .env
+# Pobieramy nowe zmiennes z .env
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 DISABLE_REGISTRATION = os.getenv("DISABLE_REGISTRATION", "false").lower() == "true"
@@ -43,7 +43,7 @@ class RegisterSchema(BaseModel):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # W sieci lokalnej pozwalamy na dostęp z dowolnego źródła (Twojego komputera/NAS-a)
+    allow_origins=["*"],  # W sieci lokalnej pozwalamy na dostęp z dowolnego źródła
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,7 +55,6 @@ BASE_STORAGE = "/storage"
 LOGS_BASE_DIR = "/app/logs/tasks"
 APP_LOG_PATH = "/app/logs/app.log"
 
-# Pobieramy klucz ze zmiennej środowiskowej kontenera. Jeśli go nie ma, domyślnie ustawiamy bezpieczny fallback.
 API_KEY_SECRET = os.getenv("API_KEY", "DomyślnyKluczBezpieczeństwa")
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
@@ -69,11 +68,13 @@ def verify_api_key(api_key: str = Depends(api_key_header)):
     return api_key
 
 # --- POPRAWKA: KONFIGURACJA KOLEJKOWANIA ZADAŃ NA NAS ---
-# max_workers=1 oznacza wykonywanie zadań jedno po drugim. 
 executors = {
     'default': ThreadPoolExecutor(max_workers=1)
 }
 scheduler = BackgroundScheduler(executors=executors)
+
+# Przechowuje referencje do uruchomionych procesów systemowych {task_id: subprocess.Popen}
+active_backup_processes = {}
 
 # --- SCHEMAT WALIDACJI DANYCH ---
 class TaskSchema(BaseModel):
@@ -89,25 +90,15 @@ class TaskSchema(BaseModel):
     retention_days: int = 0    # Liczba trzymanych wersji kosza (0 = brak)
     discord_webhook: Optional[str] = None
     ntfy_url: Optional[str] = None
+    custom_flags: Optional[List[str]] = []  # <-- NOWE POLE NA FLAGI PER ZADANIE
 
 # --- FUNKCJE POMOCNICZE ---
-#def log_to_app(message: str):
-#    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-#    
-#    # POPRAWKA: Automatycznie twórz folder logs, jeśli nie istnieje
-#    os.makedirs(os.path.dirname(APP_LOG_PATH), exist_ok=True)
-#    
-#    with open(APP_LOG_PATH, "a", encoding="utf-8") as f:
-#        f.write(f"[{timestamp}] {message}\n")
-
 def log_to_app(message: str):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     os.makedirs(os.path.dirname(APP_LOG_PATH), exist_ok=True)
     
-    # Tworzymy logger dedykowany do rotacji
     logger = logging.getLogger("AppLogger")
     
-    # Zapobiegamy dublowaniu się handlerów przy wielokrotnym wywołaniu funkcji
     if not logger.handlers:
         handler = RotatingFileHandler(APP_LOG_PATH, maxBytes=5*1024*1024, backupCount=7, encoding="utf-8")
         formatter = logging.Formatter('[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
@@ -115,7 +106,6 @@ def log_to_app(message: str):
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
     
-    # Zapisujemy wiadomość przez rotujący handler (wytnie datę automatycznie wg formatera)
     logger.info(message)
 
 def send_notification(task_name: str, status: str, discord_url: str = None, ntfy_url: str = None):
@@ -200,13 +190,6 @@ def clean_old_trash_folders(task: dict):
         except Exception as e:
             log_to_app(f"Błąd czyszczenia kosza w chmurze: {str(e)}")
 
-#def clean_all_trash_folders_cron():
-#    log_to_app("Harmonogram: Uruchomiono nocne czyszczenie kosza dla wszystkich zadań.")
-#    config = get_all_tasks()
-#    for task in config.get("tasks", []):
-#        if task.get("enabled", True) and task.get("retention_days", 0) > 0:
-#            clean_old_trash_folders(task)
-
 def clean_all_trash_folders_cron():
     log_to_app("Harmonogram: Uruchomiono nocne czyszczenie kosza dla wszystkich zadań.")
     config = get_all_tasks()
@@ -214,17 +197,16 @@ def clean_all_trash_folders_cron():
         if task.get("enabled", True) and task.get("retention_days", 0) > 0:
             clean_old_trash_folders(task)
             
-    # --- NOWA SEKCJA: CZYSZCZENIE LOGÓW STARSZYCH NIŻ 30/365 DNI ---
-    log_to_app("Harmonogram: Uruchomiono czyszczenie logów starszych niż 30/365 dni.")
+    # --- NOWA SEKCJA: CZYSZCZENIE LOGÓW STARSZYCH NIŻ 365 DNI ---
+    log_to_app("Harmonogram: Uruchomiono czyszczenie logów starszych niż 365 dni.")
     now = time.time()
-    cutoff = now - (365 * 24 * 60 * 60) # 30/365 dni w sekundach
+    cutoff = now - (365 * 24 * 60 * 60)
     
     if os.path.exists(LOGS_BASE_DIR):
         for root, dirs, files in os.walk(LOGS_BASE_DIR):
             for file in files:
                 if file.endswith(".log"):
                     file_path = os.path.join(root, file)
-                    # Jeśli plik był modyfikowany dawniej niż 30 dni temu - usuń go
                     if os.path.getmtime(file_path) < cutoff:
                         try:
                             os.remove(file_path)
@@ -234,7 +216,6 @@ def clean_all_trash_folders_cron():
 
 # --- SILNIK BACKUPU ---
 def execute_backup_process(task: dict):
-    # 1. NA SAMYM POCZĄTKU: Ustawiamy status zadania na RUNNING w pliku config.json
     config = get_all_tasks()
     for t in config.get("tasks", []):
         if t["id"] == task["id"]:
@@ -283,8 +264,16 @@ def execute_backup_process(task: dict):
         else:
             cmd.append("copy")
             
-        # Ograniczenie zużycia pamięci RAM dla rclone
-        cmd.extend(["--buffer-size=16M", "--transfers=2"])
+        # --- POPRAWKA: POPRAWNE SPRAWDZANIE FLAG (ZADANIE -> GLOBALNE -> FALLBACK) ---
+        global_config = get_all_tasks()
+        settings = global_config.get("settings", {})
+        
+        rclone_flags = task.get("custom_flags")
+        # Jeśli klucz w ogóle nie istnieje (stare zadania), rclone_flags będzie None
+        if rclone_flags is None:
+            rclone_flags = settings.get("rclone_flags", ["--buffer-size=16M", "--transfers=2"])
+        
+        cmd.extend(rclone_flags)
             
         for ex in task.get("exclude", []):
             if ex: cmd.extend(["--exclude", ex])
@@ -293,16 +282,19 @@ def execute_backup_process(task: dict):
     else:
         return
 
-    # --- POPRAWIONE WCIĘCIE BLOKU TRY-EXCEPT ---
     try:
         with open(log_file_path, "w", encoding="utf-8") as log_file:
             log_file.write(f"=== START BACKUP ({task['type'].upper()}): {task['name']} ===\n")
             log_file.write(f"Komenda: {' '.join(cmd)}\n\n")
-            process = subprocess.run(cmd, stdout=log_file, stderr=log_file, text=True)
+            log_file.flush()
             
+            process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, text=True)
+            active_backup_processes[task["id"]] = process
+            process.wait()
+            
+        active_backup_processes.pop(task["id"], None)
         final_status = "OK" if process.returncode == 0 else "Błąd"
         
-        # 2. NA KOŃCU: Zmieniamy status z RUNNING na finalny status po zakończeniu procesu
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task["id"]:
@@ -316,7 +308,6 @@ def execute_backup_process(task: dict):
         if final_status == "OK":
             clean_old_trash_folders(task)
     except Exception as e:
-        # W razie awarii aplikacji też musimy zdjąć status RUNNING
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task["id"]:
@@ -342,13 +333,26 @@ def execute_restore_process(task: dict):
         cmd = ["rsync", "-rtv", dest_path, task["source"]]
     elif task["type"] == "cloud":
         cmd = ["rclone", f"--config={RCLONE_CONFIG_PATH}", "copy", task["destination"], task["source"], "-v"]
+        
+        # --- POPRAWKA: WSTRZYKIWANIE DYNAMICZNYCH FLAG DO PROCESU RESTORE ---
+        global_config = get_all_tasks()
+        settings = global_config.get("settings", {})
+        rclone_flags = task.get("custom_flags")
+        if rclone_flags is None:
+            rclone_flags = settings.get("rclone_flags", ["--buffer-size=16M", "--transfers=2"])
+            
+        # Wstrzykujemy flagi optymalizacyjne zaraz po słowie 'copy'
+        cmd = cmd[:3] + rclone_flags + cmd[3:]
     else:
         return
 
     try:
         with open(log_file_path, "w", encoding="utf-8") as log_file:
-            log_file.write(f"=== START RESTORE: {task['name']} ===\n\n")
+            log_file.write(f"=== START RESTORE: {task['name']} ===\n")
+            log_file.write(f"Komenda: {' '.join(cmd)}\n\n")
+            log_file.flush()
             process = subprocess.run(cmd, stdout=log_file, stderr=log_file, text=True)
+            
         status = "SUKCES" if process.returncode == 0 else "BŁĄD"
         log_to_app(f"Przywracanie {task['name']} zakończone: {status}.")
         send_notification(f"RESTORE: {task['name']}", status, discord_url=task.get("discord_webhook"), ntfy_url=task.get("ntfy_url"))
@@ -401,7 +405,6 @@ def create_task(task: TaskSchema):
     existing_ids = [t["id"] for t in config.get("tasks", [])]
     new_id = max(existing_ids) + 1 if existing_ids else 1
     
-    # Walidacja: Sprawdzamy dysk tylko dla lokalnych kopii
     if task.type == "local" and not os.path.exists(task.source):
         raise HTTPException(status_code=400, detail=f"Brak katalogu: {task.source}")
     elif task.type == "cloud" and not os.path.exists(task.destination) and not task.destination.startswith("http"):
@@ -425,7 +428,6 @@ def update_task(task_id: int, fields: TaskSchema):
     
     if idx is None: raise HTTPException(status_code=404, detail="Brak zadania")
     
-    # Walidacja: Sprawdzamy dysk tylko dla lokalnych kopii
     if fields.type == "local" and not os.path.exists(fields.source):
         raise HTTPException(status_code=400, detail="Brak źródła")
     elif fields.type == "cloud" and not os.path.exists(fields.destination):
@@ -453,14 +455,12 @@ def delete_task(task_id: int):
     log_to_app(f"Usunięto zadanie ID {task_id}.")
     return {"message": "Zadanie usunięte"}
 
-# --- RĘCZNE WYWOŁANIE TRAFIA DO KOLEJKI SCHEDULERA (ThreadPoolExecutor) ---
 @app.post("/api/tasks/{task_id}/run", dependencies=[Depends(verify_api_key)])
 def run_task(task_id: int):
     config = get_all_tasks()
     task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
     if not task: raise HTTPException(status_code=404, detail="Brak zadania")
     
-    # Zamiast BackgroundTasks, wrzucamy bezpośrednio do kolejki wykonawczej z limitami wątków
     scheduler.add_job(
         execute_backup_process, 
         args=[task], 
@@ -470,7 +470,34 @@ def run_task(task_id: int):
     log_to_app(f"Ręczne wywołanie zadania ID {task_id} dodane do kolejki wątków.")
     return {"message": "Zadanie przekazane do kolejki wykonawczej (wykonywanie jedno po drugim)."}
 
-# --- RĘCZNE WYWOŁANIE RESTORE TRAFIA DO TEJ SAMEJ KOLEJKI ---
+@app.post("/api/tasks/{task_id}/stop", dependencies=[Depends(verify_api_key)])
+def stop_task(task_id: int):
+    process = active_backup_processes.get(task_id)
+    
+    if process:
+        try:
+            log_to_app(f"Żądanie zatrzymania zadania ID {task_id}. Wysyłanie sygnału zakończenia.")
+            process.terminate()
+            
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                
+            return {"message": "Zadanie zostało wymuszenie zatrzymane."}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Błąd podczas zatrzymywania procesu: {str(e)}")
+            
+    config = get_all_tasks()
+    for t in config.get("tasks", []):
+        if t["id"] == task_id and t["status"] == "RUNNING":
+            t["status"] = "Błąd"
+            save_config(config)
+            log_to_app(f"Ręczne zresetowanie zawieszonego statusu RUNNING dla zadania ID {task_id}.")
+            return {"message": "Proces nie był aktywny. Status zadania zresetowano do pozycji 'Błąd'."}
+            
+    raise HTTPException(status_code=400, detail="To zadanie nie jest aktualnie uruchomione.")
+
 @app.post("/api/tasks/{task_id}/restore", dependencies=[Depends(verify_api_key)])
 def restore_task(task_id: int):
     config = get_all_tasks()
@@ -502,15 +529,12 @@ def get_task_logs(task_id: int):
         return {"logs": "Brak logów dla tego zadania. Nie zostało jeszcze uruchomione."}
         
     try:
-        # Pobieramy lista wszystkich plików .log w folderze zadania
         log_files = [os.path.join(task_log_dir, f) for f in os.listdir(task_log_dir) if f.endswith(".log")]
         if not log_files:
             return {"logs": "Brak plików logów w katalogu zadania."}
             
-        # Sortujemy po czasie modyfikacji, aby wziąć najnowszy log
         latest_log_path = max(log_files, key=os.path.getmtime)
         
-        # Odczytujemy ostatnie 200 linii logu, żeby nie przeciążyć przeglądarki olbrzymim plikiem
         with open(latest_log_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
             last_lines = lines[-200:] if len(lines) > 200 else lines
@@ -542,18 +566,14 @@ def login(credentials: LoginSchema):
     config = get_all_tasks()
     users = config.get("users", [])
     
-    # 1. Sprawdzamy czy użytkownik istnieje w pliku config.json
     user = next((u for u in users if u["username"] == credentials.username), None)
     
-    # 2. Jeśli baza jest pusta, a ktoś loguje się na domyślnego admina z .env
     if not user and credentials.username == ADMIN_USERNAME:
-        # Sprawdzamy hasło wprost z .env
         if credentials.password == ADMIN_PASSWORD:
             token = jwt.encode({"username": ADMIN_USERNAME}, JWT_SECRET, algorithm="HS256")
             return {"token": token, "username": ADMIN_USERNAME}
         raise HTTPException(status_code=400, detail="Nieprawidłowe hasło administratora.")
         
-    # 3. Stały użytkownik z bazy (porównujemy zahaszowane hasło)
     if user:
         password_bytes = credentials.password.encode('utf-8')
         hashed_bytes = user["password"].encode('utf-8')
@@ -574,7 +594,6 @@ def register(credentials: RegisterSchema):
     if any(u["username"] == credentials.username for u in config["users"]):
         raise HTTPException(status_code=400, detail="Użytkownik o takiej nazwie już istnieje.")
         
-    # Haszujemy hasło przed zapisem do pliku JSON
     hashed_password = bcrypt.hashpw(credentials.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     
     new_user = {
