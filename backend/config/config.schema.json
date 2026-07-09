@@ -3,6 +3,16 @@
   "title": "BackupManagerConfig",
   "type": "object",
   "properties": {
+    "settings": {
+      "type": "object",
+      "properties": {
+        "rclone_flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["rclone_flags"]
+    },
     "tasks": {
       "type": "array",
       "items": {
@@ -18,6 +28,10 @@
           "enabled": {"type": "boolean"},
           "restore_enabled": {"type": "boolean"},
           "exclude": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "custom_flags": {
             "type": "array",
             "items": {"type": "string"}
           },
