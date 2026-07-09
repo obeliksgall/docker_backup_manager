@@ -292,8 +292,18 @@ def execute_backup_process(task: dict):
             process.wait()
             
         active_backup_processes.pop(task["id"], None)
+            
+        # Check if the task status in the config file was modified to "STOPPED" by the stop endpoint
+        current_config = get_all_tasks()
+        task_in_db = next((t for t in current_config.get("tasks", []) if t["id"] == task["id"]), None)
+            
+        if task_in_db and task_in_db.get("status") == "STOPPED":
+            log_to_app(f"Task '{task['name']}' was manually terminated by the user.")
+            return  # Exit process without rewriting status data or triggering duplicate signals
+                
+        # Natural exit path handler:
         final_status = "SUCCESS" if process.returncode == 0 else "ERROR"
-        
+            
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task["id"]:
@@ -470,13 +480,36 @@ def run_task(task_id: int):
 
 @app.post("/api/tasks/{task_id}/stop", dependencies=[Depends(verify_api_key)])
 def stop_task(task_id: int):
+    # Fetch task settings to gain access to name parameters and webhooks
+    config = get_all_tasks()
+    task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
+    if not task: 
+        raise HTTPException(status_code=404, detail="Task not found")
+
     process = active_backup_processes.get(task_id)
     
     if process:
         try:
             log_to_app(f"Stop requested for task ID {task_id}. Transmitting termination signals.")
-            process.terminate()
             
+            # 1. Fire custom termination webhook alert instead of the error fallback
+            send_notification(
+                task["name"], 
+                "Stopped on demand 🛑", 
+                discord_url=task.get("discord_webhook"), 
+                ntfy_url=task.get("ntfy_url")
+            )
+            
+            # 2. Assign the specific "STOPPED" tracking state to database configuration 
+            config = get_all_tasks()
+            for t in config.get("tasks", []):
+                if t["id"] == task_id:
+                    t["status"] = "STOPPED"
+                    break
+            save_config(config)
+            
+            # 3. Cease system level subprocess
+            process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -486,13 +519,20 @@ def stop_task(task_id: int):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to kill running subprocess: {str(e)}")
             
+    # Subprocess entry absent from memory dictionary but registered database value reads RUNNING
     config = get_all_tasks()
     for t in config.get("tasks", []):
         if t["id"] == task_id and t["status"] == "RUNNING":
-            t["status"] = "ERROR"
+            t["status"] = "STOPPED"
             save_config(config)
             log_to_app(f"Manually cleared hanging RUNNING status for task ID {task_id}.")
-            return {"message": "Process wasn't active. Task status reset to 'ERROR'."}
+            send_notification(
+                task["name"], 
+                "Stopped on demand 🛑", 
+                discord_url=task.get("discord_webhook"), 
+                ntfy_url=task.get("ntfy_url")
+            )
+            return {"message": "Process wasn't active. Task status reset to 'STOPPED'."}
             
     raise HTTPException(status_code=400, detail="This task is not currently active.")
 

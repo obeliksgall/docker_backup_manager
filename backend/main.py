@@ -293,18 +293,28 @@ def execute_backup_process(task: dict):
             process.wait()
             
         active_backup_processes.pop(task["id"], None)
+            
+        # Sprawdzamy czy status w bazie nie został już zmieniony na "Zatrzymane" przez endpoint STOP
+        current_config = get_all_tasks()
+        task_in_db = next((t for t in current_config.get("tasks", []) if t["id"] == task["id"]), None)
+            
+        if task_in_db and task_in_db.get("status") == "Zatrzymane":
+            log_to_app(f"Zadanie '{task['name']}' zostało przerwane na żądanie użytkownika.")
+            return  # Przerywamy wykonywanie, nie nadpisujemy statusu i nie dublujemy powiadomień
+                
+        # Jeśli to był naturalny koniec procesu:
         final_status = "OK" if process.returncode == 0 else "Błąd"
-        
+            
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task["id"]:
                 t["status"] = final_status
                 break
         save_config(config)
-        
+            
         log_to_app(f"Zadanie {task['name']} zakończone status: {final_status}.")
         send_notification(task["name"], final_status, discord_url=task.get("discord_webhook"), ntfy_url=task.get("ntfy_url"))
-        
+            
         if final_status == "OK":
             clean_old_trash_folders(task)
     except Exception as e:
@@ -472,13 +482,36 @@ def run_task(task_id: int):
 
 @app.post("/api/tasks/{task_id}/stop", dependencies=[Depends(verify_api_key)])
 def stop_task(task_id: int):
+    # Pobieramy konfigurację zadania, aby mieć dostęp do jego nazwy oraz webhooków powiadomień
+    config = get_all_tasks()
+    task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
+    if not task: 
+        raise HTTPException(status_code=404, detail="Brak zadania")
+
     process = active_backup_processes.get(task_id)
     
     if process:
         try:
             log_to_app(f"Żądanie zatrzymania zadania ID {task_id}. Wysyłanie sygnału zakończenia.")
-            process.terminate()
             
+            # 1. Wysyłamy dedykowaną notyfikację na Discord/Ntfy ZAMIAST standardowej
+            send_notification(
+                task["name"], 
+                "Zatrzymane na żądanie 🛑", 
+                discord_url=task.get("discord_webhook"), 
+                ntfy_url=task.get("ntfy_url")
+            )
+            
+            # 2. Ustawiamy status "Zatrzymane" w bazie danych
+            config = get_all_tasks()
+            for t in config.get("tasks", []):
+                if t["id"] == task_id:
+                    t["status"] = "Zatrzymane"
+                    break
+            save_config(config)
+            
+            # 3. Ubijamy proces systemowy
+            process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -488,13 +521,20 @@ def stop_task(task_id: int):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Błąd podczas zatrzymywania procesu: {str(e)}")
             
+    # Jeśli fizycznego procesu nie ma w pamięci, ale status w pliku JSON wisiał jako RUNNING
     config = get_all_tasks()
     for t in config.get("tasks", []):
         if t["id"] == task_id and t["status"] == "RUNNING":
-            t["status"] = "Błąd"
+            t["status"] = "Zatrzymane"
             save_config(config)
             log_to_app(f"Ręczne zresetowanie zawieszonego statusu RUNNING dla zadania ID {task_id}.")
-            return {"message": "Proces nie był aktywny. Status zadania zresetowano do pozycji 'Błąd'."}
+            send_notification(
+                task["name"], 
+                "Zatrzymane na żądanie 🛑", 
+                discord_url=task.get("discord_webhook"), 
+                ntfy_url=task.get("ntfy_url")
+            )
+            return {"message": "Proces nie był aktywny. Status zadania zresetowano do pozycji 'Zatrzymane'."}
             
     raise HTTPException(status_code=400, detail="To zadanie nie jest aktualnie uruchomione.")
 
