@@ -22,6 +22,7 @@ interface Task {
   restore_enabled: boolean;
   exclude: string[];
   custom_flags: string[];
+  next_task_id?: number | null;
   retention_days: number;
   status?: string;
   discord_webhook?: string;
@@ -354,7 +355,12 @@ export default function App() {
                 </div>
 
                 <div>
-                  <h3 className="font-bold text-base text-white truncate max-w-[180px] mb-3">{task.name}</h3>
+				  <div className="flex items-center gap-2 mb-3">
+					<span className="bg-slate-950 text-indigo-400 font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-800/60 font-bold" title="Task ID">
+					  #{task.id}
+					</span>
+					<h3 className="font-bold text-base text-white truncate max-w-[180px]">{task.name}</h3>
+				  </div>
                   <div className="mb-4">
                     <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold inline-flex items-center gap-1.5 border ${
                       task.type === 'cloud' ? 'bg-blue-500/5 text-blue-400 border-blue-500/10' : 'bg-emerald-500/5 text-emerald-400 border-emerald-500/10'

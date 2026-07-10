@@ -68,6 +68,7 @@ const resources = {
       "ph_cron": "np. 0 3 * * *",
       "lbl_retention": "Retencja Kosza (wersje)",
       "lbl_exclusions": "Wykluczenia plików (rozdziel przecinkami)",
+      "lbl_rclone_flags": "Custom Rclone Flags (rozdziel przecinkami)",
       "ph_exclusions": "np. .DS_Store, *.tmp",
       "lbl_cron_active": "Zadanie aktywne (Harmonogram)",
       "lbl_allow_restore": "Zezwól na operacje Restore",
@@ -92,6 +93,8 @@ const resources = {
 	  "tooltip_edit": "Edytuj zadanie",
 	  "tooltip_delete": "Usuń zadanie",
 	  "status_processing": "W trakcie...",
+	  "lbl_next_task": "Następne zadanie w łańcuchu (potok)",
+      "option_none": "--- Brak (koniec łańcucha) ---",
     }
   },
   en: {
@@ -160,6 +163,7 @@ const resources = {
       "ph_cron": "e.g., 0 3 * * *",
       "lbl_retention": "Trash Retention (versions)",
       "lbl_exclusions": "File Exclusions (comma-separated)",
+      "lbl_rclone_flags": "Custom Rclone Flags (comma-separated)",
       "ph_exclusions": "e.g., .DS_Store, *.tmp",
       "lbl_cron_active": "Task Active (Schedule)",
       "lbl_allow_restore": "Allow Restore Operations",
@@ -184,6 +188,8 @@ const resources = {
 	  "tooltip_edit": "Edit task",
 	  "tooltip_delete": "Delete task",
 	  "status_processing": "Processing...",
+	  "lbl_next_task": "Next task in chain (pipeline)",
+      "option_none": "--- None (end of chain) ---",
     }
   }
 };

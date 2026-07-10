@@ -14,7 +14,8 @@ interface Task {
   enabled: boolean;
   restore_enabled: boolean;
   exclude: string[];
-  custom_flags: string[]; // <-- NOWE POLE W INTERFEJSIE
+  custom_flags: string[];
+  next_task_id?: number | null; // <-- NOWE POLE
   retention_days: number;
   discord_webhook?: string;
   ntfy_url?: string;
@@ -30,19 +31,40 @@ interface TaskModalProps {
 export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalProps) {
   const { t } = useTranslation();
   
+  // Przechowujemy listę wszystkich zadań pobraną z pliku config w celu wyświetlenia w select
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
+
   const [formData, setFormData] = useState<Task>({
     name: '', source: '', destination: '', type: 'local', mode: 'mirror',
     schedule: '0 3 * * *', enabled: true, restore_enabled: false, exclude: [],
-    custom_flags: [], retention_days: 0, discord_webhook: '', ntfy_url: ''
+    custom_flags: [], next_task_id: null, retention_days: 0, discord_webhook: '', ntfy_url: ''
   });
 
   const [excludeInput, setExcludeInput] = useState('');
-  const [customFlagsInput, setCustomFlagsInput] = useState(''); // <-- STAN DLA INPUTU FLAG
+  const [customFlagsInput, setCustomFlagsInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserTarget, setBrowserTarget] = useState<'source' | 'destination'>('source');
   const [browserTitle, setBrowserTitle] = useState('');
+
+  // Pobieranie listy zadań z API do selecta przy otwarciu modala
+  useEffect(() => {
+    if (isOpen) {
+      const fetchRawTasks = async () => {
+        try {
+          const res = await fetch(`http://${window.location.hostname}:8000/api/tasks`, {
+            headers: { 'X-API-Key': import.meta.env.VITE_API_KEY || 'DomyślnyKluczBezpieczeństwa' }
+          });
+          const data = await res.json();
+          if (data && Array.isArray(data.tasks)) setAllTasks(data.tasks);
+        } catch (e) {
+          console.error("Failed to load tasks for select element", e);
+        }
+      };
+      fetchRawTasks();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (task) {
@@ -50,18 +72,19 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
         ...task,
         discord_webhook: task.discord_webhook || '',
         ntfy_url: task.ntfy_url || '',
-        custom_flags: task.custom_flags || []
+        custom_flags: task.custom_flags || [],
+        next_task_id: task.next_task_id !== undefined ? task.next_task_id : null
       });
       setExcludeInput(task.exclude ? task.exclude.join(', ') : '');
-      setCustomFlagsInput(task.custom_flags ? task.custom_flags.join(', ') : ''); // <-- ŁADOWANIE FLAG DO EDYCJI
+      setCustomFlagsInput(task.custom_flags ? task.custom_flags.join(', ') : '');
     } else {
       setFormData({
         name: '', source: '', destination: '', type: 'local', mode: 'mirror',
         schedule: '0 3 * * *', enabled: true, restore_enabled: false, exclude: [],
-        custom_flags: [], retention_days: 0, discord_webhook: '', ntfy_url: ''
+        custom_flags: [], next_task_id: null, retention_days: 0, discord_webhook: '', ntfy_url: ''
       });
       setExcludeInput('');
-      setCustomFlagsInput(''); // <-- CZYSZCZENIE INPUTU
+      setCustomFlagsInput('');
     }
   }, [task, isOpen]);
 
@@ -73,7 +96,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
     
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'retention_days' ? parseInt(value) || 0 : val
+      [name]: name === 'retention_days' ? parseInt(value) || 0 :
+              name === 'next_task_id' ? (value === "" ? null : parseInt(value)) : val
     }));
   };
 
@@ -94,7 +118,6 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
     e.preventDefault();
     setIsSubmitting(true);
     
-    // Konwersja inputów tekstowych na tablice stringów
     const excludeArray = excludeInput.split(',').map(item => item.trim()).filter(item => item !== '');
     const flagsArray = customFlagsInput.split(',').map(item => item.trim()).filter(item => item !== '');
 
@@ -102,7 +125,7 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
       await onSave({ ...formData, exclude: excludeArray, custom_flags: flagsArray });
       onClose();
     } catch (err) {
-      // log błędu
+      // error handler
     } finally {
       setIsSubmitting(false);
     }
@@ -229,6 +252,28 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
             </div>
           </div>
 
+          {/* DYNAMICZNY SELEKTOR NASTĘPNEGO ZADANIA (ŁAŃCUCH) */}
+          <div>
+            <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_next_task')}</label>
+            <select
+              name="next_task_id" 
+              value={formData.next_task_id ?? ""} 
+              onChange={handleChange}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500 transition text-xs"
+            >
+              <option value="">{t('option_none')}</option>
+              {allTasks
+                // Odfiltrowujemy aktualnie edytowane zadanie, aby zapobiec zapętleniu (self-reference)
+                .filter(t => t.id !== formData.id)
+                .map(t => (
+                  <option key={t.id} value={t.id}>
+                    #{t.id} - {t.name} ({t.type.toUpperCase()})
+                  </option>
+                ))
+              }
+            </select>
+          </div>
+
           <div>
             <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_exclusions')}</label>
             <input
@@ -238,10 +283,9 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
             />
           </div>
 
-          {/* DYNAMICZNE POLE DLA FLAG RCLONE PER ZADANIE */}
           {formData.type === 'cloud' && (
             <div>
-              <label className="block text-slate-400 font-medium mb-1.5">Custom Rclone Flags (rozdziel przecinkami)</label>
+              <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_rclone_flags')}</label>
               <input
                 type="text" value={customFlagsInput} onChange={(e) => setCustomFlagsInput(e.target.value)}
                 placeholder="np. --buffer-size=32M, --transfers=4, --bwlimit=10M"
