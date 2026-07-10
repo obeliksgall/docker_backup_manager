@@ -91,6 +91,7 @@ class TaskSchema(BaseModel):
     discord_webhook: Optional[str] = None
     ntfy_url: Optional[str] = None
     custom_flags: Optional[List[str]] = []  # <-- NOWE POLE NA FLAGI PER ZADANIE
+    next_task_id: Optional[int] = None  # <-- NOWE POLE: ID następnego zadania (np. 3)
 
 # --- FUNKCJE POMOCNICZE ---
 def log_to_app(message: str):
@@ -315,8 +316,30 @@ def execute_backup_process(task: dict):
         log_to_app(f"Zadanie {task['name']} zakończone status: {final_status}.")
         send_notification(task["name"], final_status, discord_url=task.get("discord_webhook"), ntfy_url=task.get("ntfy_url"))
             
-        if final_status == "OK":
+        #if final_status == "OK":
+        #    clean_old_trash_folders(task)
+        if final_status in ["OK", "SUCCESS"]:
             clean_old_trash_folders(task)
+            
+            # --- NOWOŚĆ: AUTOMATYCZNE URUCHAMIANIE ZADANIA ZALEŻNEGO ---
+            next_id = task.get("next_task_id")
+            if next_id:
+                all_tasks_config = get_all_tasks()
+                next_task = next((t for t in all_tasks_config.get("tasks", []) if t["id"] == next_id), None)
+                
+                if next_task:
+                    log_to_app(f"Łańcuch zadań: Zadanie '{task['name']}' zakończone sukcesem. Automatyczne wywoływanie kolejnego zadania ID {next_id}: '{next_task['name']}'.")
+                    
+                    # Wrzucamy kolejne zadanie do kolejki Schedulera
+                    scheduler.add_job(
+                        execute_backup_process, 
+                        args=[next_task], 
+                        id=f"chained_{next_id}_{int(datetime.now().timestamp())}", 
+                        name=f"Chained Run: {next_task['name']}"
+                    )
+                else:
+                    log_to_app(f"Łańcuch zadań ostrzeżenie: Zadanie '{task['name']}' wskazuje na następne ID {next_id}, ale takie zadanie nie istnieje w config.json.")
+            # -----------------------------------------------------------
     except Exception as e:
         config = get_all_tasks()
         for t in config.get("tasks", []):
