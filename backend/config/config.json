@@ -1,46 +1,83 @@
 {
+  "settings": {
+    "rclone_flags": [
+      "--buffer-size=64M",
+      "--transfers=4",
+      "--checkers=8",
+      "--contimeout=60s"
+    ]
+  },
   "tasks": [
     {
-      "name": "Kopia Dokumentów Lokalna",
-      "source": "/storage/dokumenty NOWE",
-      "destination": "/storage/backup_test_dokumenty",
+      "id": 1,
+      "name": "Kopia Lokalna - Dokumenty (Początek Łańcucha)",
+      "next_task_id": 2,
+      "source": "/mnt/user/documents",
+      "destination": "/mnt/user/backup/local/documents",
       "type": "local",
       "mode": "mirror",
-      "schedule": "0 3 * * *",
-      "enabled": false,
+      "schedule": "0 2 * * *",
+      "enabled": true,
       "restore_enabled": false,
       "exclude": [
-        ".DS_Store",
-        "tmp",
         "*.tmp",
-        "/bananu/nieusuwaj.txt",
-        "ponczek/"
+        "~*"
       ],
-      "retention_days": 3,
-      "discord_webhook": "",
-      "ntfy_url": "",
-      "id": 1,
-      "status": "OK"
+      "custom_flags": [],
+      "retention_days": 7,
+      "status": "OK",
+      "discord_webhook": "https://discord.com/api/webhooks/example_id/example_token",
+      "ntfy_url": "https://ntfy.sh/my-backup-alerts"
     },
     {
-      "name": "Kopia Zdjęć do Chmury",
-      "source": "/storage/zdjecia",
-      "destination": "ponczek:/backup/zdjecia123",
+      "id": 2,
+      "name": "Kopia Chmurowa - Dokumenty (Krok 2)",
+      "next_task_id": 3,
+      "source": "/mnt/user/backup/local/documents",
+      "destination": "gdrive:/backups/documents",
       "type": "cloud",
-      "mode": "incremental",
+      "mode": "copy",
+      "schedule": "0 3 * * *",
+      "enabled": true,
+      "restore_enabled": true,
+      "exclude": [],
+      "custom_flags": [
+        "--fast-list",
+        "--drive-chunk-size=64M"
+      ],
+      "retention_days": 30,
+      "status": "OK",
+      "discord_webhook": "https://discord.com/api/webhooks/example_id/example_token",
+      "ntfy_url": null
+    },
+    {
+      "id": 3,
+      "name": "Kopia Chmurowa - Zdjęcia (Koniec Łańcucha)",
+      "next_task_id": null,
+      "source": "/mnt/user/photos",
+      "destination": "onedrive:/backups/photos",
+      "type": "cloud",
+      "mode": "mirror",
       "schedule": "0 4 * * *",
       "enabled": false,
       "restore_enabled": false,
       "exclude": [
-        "*.tmp"
+        "*.raw",
+        "Thumbs.db"
+      ],
+      "custom_flags": [
+        "--bwlimit=10M"
       ],
       "retention_days": 0,
-      "discord_webhook": "",
-      "ntfy_url": "",
-      "id": 2,
-      "status": "Błąd"
+      "status": null,
+      "discord_webhook": null,
+      "ntfy_url": null
     }
   ],
   "users": [
+    {
+      "username": "admin",
+      "password": "$argon2id$v=19$m=65536,t=3,p=4$hashed_password_placeholder"
+    }
   ]
 }
