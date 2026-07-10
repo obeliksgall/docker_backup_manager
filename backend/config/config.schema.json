@@ -20,6 +20,7 @@
         "properties": {
           "id": {"type": "integer"},
           "name": {"type": "string"},
+		  "next_task_id": {"type": ["integer", "null"]},
           "source": {"type": "string"},
           "destination": {"type": "string"},
           "type": {"type": "string", "enum": ["local", "cloud"]},
