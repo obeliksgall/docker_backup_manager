@@ -95,6 +95,7 @@ const resources = {
 	  "status_processing": "W trakcie...",
 	  "lbl_next_task": "Następne zadanie w łańcuchu (potok)",
       "option_none": "--- Brak (koniec łańcucha) ---",
+	  "cloned_suffix": "Kopia",
     }
   },
   en: {
@@ -190,6 +191,7 @@ const resources = {
 	  "status_processing": "Processing...",
 	  "lbl_next_task": "Next task in chain (pipeline)",
       "option_none": "--- None (end of chain) ---",
+	  "cloned_suffix": "Copy",
     }
   }
 };
