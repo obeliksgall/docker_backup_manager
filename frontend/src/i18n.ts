@@ -96,6 +96,7 @@ const resources = {
 	  "lbl_next_task": "Następne zadanie w łańcuchu (potok)",
       "option_none": "--- Brak (koniec łańcucha) ---",
 	  "cloned_suffix": "Kopia",
+	  "tooltip_clone": "Klonuj zadanie", // <-- DODAJ TĘ LINIĘ
     }
   },
   en: {
@@ -192,6 +193,7 @@ const resources = {
 	  "lbl_next_task": "Next task in chain (pipeline)",
       "option_none": "--- None (end of chain) ---",
 	  "cloned_suffix": "Copy",
+	  "tooltip_clone": "Clone task", // <-- DODAJ TĘ LINIĘ
     }
   }
 };

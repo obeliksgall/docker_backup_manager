@@ -352,7 +352,7 @@ export default function App() {
                     }} 
                     disabled={task.status === 'RUNNING'}
                     className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-amber-400 rounded-lg transition disabled:opacity-30 disabled:hover:text-slate-400 disabled:cursor-not-allowed" 
-                    title="Klonuj zadanie"
+                    title={t('tooltip_clone') || 'Klonuj zadanie'}
                   >
                     <Copy className="w-4 h-4" />
                   </button>
