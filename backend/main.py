@@ -419,6 +419,18 @@ def load_all_tasks_into_scheduler():
 
 @app.on_event("startup")
 def startup_event():
+    # --- NOWOŚĆ: CZYSZCZENIE STATUSÓW RUNNING PO RESTARCIE ---
+    config = get_all_tasks()
+    status_changed = False
+    for task in config.get("tasks", []):
+        if task.get("status") == "RUNNING":
+            task["status"] = "Błąd"
+            log_to_app(f"System: Wykryto wiszące zadanie ID {task['id']} ('{task['name']}') ze statusu RUNNING. Zresetowano do pozycji 'Błąd' po restarcie kontenera.")
+            status_changed = True
+    if status_changed:
+        save_config(config)
+    # --------------------------------------------------------
+
     load_all_tasks_into_scheduler()
     scheduler.start()
     log_to_app("Harmonogram (Scheduler) i system retencji uruchomiony (Kolejkowanie aktywne).")

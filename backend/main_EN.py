@@ -417,6 +417,18 @@ def load_all_tasks_into_scheduler():
 
 @app.on_event("startup")
 def startup_event():
+    # --- NEW: CLEAR HANGING RUNNING STATUSES ON STARTUP ---
+    config = get_all_tasks()
+    status_changed = False
+    for task in config.get("tasks", []):
+        if task.get("status") == "RUNNING":
+            task["status"] = "ERROR"
+            log_to_app(f"System: Detected hanging task ID {task['id']} ('{task['name']}') in RUNNING state. Reset to 'ERROR' due to container restart.")
+            status_changed = True
+    if status_changed:
+        save_config(config)
+    # ------------------------------------------------------
+
     load_all_tasks_into_scheduler()
     scheduler.start()
     log_to_app("Scheduler engine and trash retention services started successfully (Queue system operational).")
