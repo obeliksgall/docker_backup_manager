@@ -119,7 +119,9 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
     setIsSubmitting(true);
     
     const excludeArray = excludeInput.split(',').map(item => item.trim()).filter(item => item !== '');
-    const flagsArray = customFlagsInput.split(',').map(item => item.trim()).filter(item => item !== '');
+    //const flagsArray = customFlagsInput.split(',').map(item => item.trim()).filter(item => item !== '');
+	// Dzieli tekst tylko po przecinku ze spacją (np. ", ")
+    const flagsArray = customFlagsInput.split(/, +/).map(item => item.trim()).filter(item => item !== '');
 
     try {
       await onSave({ ...formData, exclude: excludeArray, custom_flags: flagsArray });
