@@ -2,14 +2,11 @@ import os
 import json
 import subprocess
 import urllib.request
-
 import bcrypt
 import jwt
-
-import time                                 # <-- WYMAGANE dla time.time()
-import logging                              # <-- WYMAGANE dla logging
-from logging.handlers import RotatingFileHandler  # <-- WYMAGANE dla rotacji logów
-
+import time
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, Depends
 from pydantic import BaseModel
@@ -95,9 +92,7 @@ class TaskSchema(BaseModel):
 
 # --- FUNKCJE POMOCNICZE ---
 def log_to_app(message: str):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     os.makedirs(os.path.dirname(APP_LOG_PATH), exist_ok=True)
-    
     logger = logging.getLogger("AppLogger")
     
     if not logger.handlers:
@@ -388,7 +383,7 @@ def execute_backup_process(task_id: int):
                         args=[next_task["id"]], 
                         id=f"chained_{next_id}_{int(datetime.now().timestamp())}", 
                         name=f"Chained Run: {next_task['name']}",
-                        misfire_grace_time=None  # <-- DODAJ TO
+                        misfire_grace_time=None
                     )
                 else:
                     log_to_app(f"Łańcuch zadań ostrzeżenie: Zadanie '{task['name']}' wskazuje na następne ID {next_id}, ale takie zadanie nie istnieje w config.json.")
@@ -403,7 +398,7 @@ def execute_backup_process(task_id: int):
         log_to_app(f"Krytyczny błąd {task.get('name', f'ID {task_id}')}: {str(e)}")
 
 # --- SILNIK RESTORE ---
-def execute_restore_process(task_id: int):  # <-- ZMIANA: przyjmujemy task_id zamiast słownika task
+def execute_restore_process(task_id: int):
     # Pobieramy najświeższą konfigurację zadania z pliku JSON
     config = get_all_tasks()
     task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
@@ -464,10 +459,9 @@ def add_task_to_scheduler(task: dict):
     try:
         trigger = CronTrigger.from_crontab(task["schedule"])
         scheduler.add_job(
-            #execute_backup_process, trigger=trigger, args=[task],
             execute_backup_process, trigger=trigger, args=[task["id"]],
             id=str(task["id"]), name=task["name"], replace_existing=True,
-            misfire_grace_time=None  # <--- DODAJ TĘ LINIĘ TUTAJ!
+            misfire_grace_time=None
         )
         log_to_app(f"Zarejestrowano w harmonogramie: '{task['name']}' ({task['schedule']})")
     except Exception as e:
@@ -493,7 +487,6 @@ def startup_event():
             status_changed = True
     if status_changed:
         save_config(config)
-    # --------------------------------------------------------
 
     load_all_tasks_into_scheduler()
     scheduler.start()
@@ -575,7 +568,7 @@ def run_task(task_id: int):
         args=[task_id],
         id=f"manual_{task_id}_{int(datetime.now().timestamp())}",
         name=f"Manual Run: {task['name']}",
-        misfire_grace_time=None  # <-- DODAJ TO: zadanie wykona się niezależnie od czasu oczekiwania w kolejce
+        misfire_grace_time=None
     )
     log_to_app(f"Ręczne wywołanie zadania ID {task_id} dodane do kolejki wątków.")
     return {"message": "Zadanie przekazane do kolejki wykonawczej (wykonywanie jedno po drugim)."}
@@ -651,7 +644,7 @@ def restore_task(task_id: int):
         args=[task_id],  # <-- POPRAWKA: Przekazujemy tylko task_id
         id=f"manual_restore_{task_id}_{int(datetime.now().timestamp())}", 
         name=f"Manual Restore: {task['name']}",
-        misfire_grace_time=None  # <-- DODAJ TO
+        misfire_grace_time=None
     )
     log_to_app(f"Ręczne przywracanie zadania ID {task_id} dodane do kolejki wątków.")
     return {"message": "Przywracanie przekazane do kolejki wykonawczej."}

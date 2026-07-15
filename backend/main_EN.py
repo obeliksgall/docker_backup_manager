@@ -63,13 +63,13 @@ def verify_api_key(api_key: str = Depends(api_key_header)):
         )
     return api_key
 
-# --- TASK QUEUE CONFIGURATION FOR NAS ---
+# --- TASK QUEUE CONFIGURATION ---
 executors = {
     'default': ThreadPoolExecutor(max_workers=1)
 }
 scheduler = BackgroundScheduler(executors=executors)
 
-# Process tracking mapping
+# Process tracking map
 active_backup_processes = {}
 
 # --- DATA VALIDATION SCHEMA ---
@@ -218,7 +218,6 @@ def clean_all_trash_folders_cron():
 
 # --- BACKUP ENGINE ---
 def execute_backup_process(task_id: int):
-    # 1. Fetch freshest config from file upon thread start
     config = get_all_tasks()
     task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
     
@@ -226,7 +225,6 @@ def execute_backup_process(task_id: int):
         log_to_app(f"Execution Error: Task ID {task_id} does not exist in config.json.")
         return
 
-    # 2. Set task status to RUNNING
     for t in config.get("tasks", []):
         if t["id"] == task_id:
             t["status"] = "RUNNING"
@@ -302,11 +300,10 @@ def execute_backup_process(task_id: int):
             
         active_backup_processes.pop(task_id, None)
             
-        # Check if the process was explicitly stopped by user
         current_config = get_all_tasks()
         task_in_db = next((t for t in current_config.get("tasks", []) if t["id"] == task_id), None)
             
-        if task_in_db and task_in_db.get("status") in ["Stopped", "Zatrzymane"]:
+        if task_in_db and task_in_db.get("status") in ["Stopped", "Zatrzymane", "STOPPED"]:
             log_to_app(f"Task '{task['name']}' was stopped by user request.")
             return
                 
@@ -336,12 +333,11 @@ def execute_backup_process(task_id: int):
                                 has_other_errors = True
                 
                 if len(skipped_onedrive_files) > 0 and not has_other_errors:
-                    log_to_app(f"Task '{task['name']}': Detected {len(skipped_onedrive_files)} 'pathIsTooLong' errors. No other issues found. Status mitigated to 'OK'.")
+                    log_to_app(f"Task '{task['name']}': Detected {len(skipped_onedrive_files)} 'pathIsTooLong' errors. No other failures. Status mitigated to 'OK'.")
                     final_status = "OK"
             except Exception as parse_error:
                 log_to_app(f"Error parsing OneDrive log: {str(parse_error)}")
 
-        # Save final status
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task_id:
@@ -349,9 +345,8 @@ def execute_backup_process(task_id: int):
                 break
         save_config(config)
             
-        log_to_app(f"Task {task['name']} finished with status: {final_status}.")
+        log_to_app(f"Task {task['name']} completed with status: {final_status}.")
         
-        # Dispatch notification
         send_notification(
             task["name"], 
             final_status, 
@@ -363,7 +358,6 @@ def execute_backup_process(task_id: int):
         if final_status in ["OK", "SUCCESS"]:
             clean_old_trash_folders(task)
             
-            # Dependent task task-chain execution
             next_id = task.get("next_task_id")
             if next_id:
                 all_tasks_config = get_all_tasks()
@@ -451,7 +445,7 @@ def add_task_to_scheduler(task: dict):
         scheduler.add_job(
             execute_backup_process, trigger=trigger, args=[task["id"]],
             id=str(task["id"]), name=task["name"], replace_existing=True,
-            misfire_grace_time=None  # <--- DODAJ TĘ LINIĘ TUTAJ!
+            misfire_grace_time=None
         )
         log_to_app(f"Registered in scheduler: '{task['name']}' ({task['schedule']})")
     except Exception as e:
@@ -467,13 +461,12 @@ def load_all_tasks_into_scheduler():
 
 @app.on_event("startup")
 def startup_event():
-    # Clear active states from dangling items on runtime restart
     config = get_all_tasks()
     status_changed = False
     for task in config.get("tasks", []):
         if task.get("status") == "RUNNING":
             task["status"] = "Błąd"
-            log_to_app(f"System: Hanging task ID {task['id']} ('{task['name']}') found in RUNNING state. Recovered to 'Błąd' status after container reboot.")
+            log_to_app(f"System: Hanging task ID {task['id']} ('{task['name']}') found in RUNNING state. Purged back to 'Błąd' status after container reboot.")
             status_changed = True
     if status_changed:
         save_config(config)
@@ -554,14 +547,14 @@ def run_task(task_id: int):
     if not task: raise HTTPException(status_code=404, detail="Task not found")
     
     scheduler.add_job(
-        execute_backup_process, 
+        execute_backup_process,
         args=[task_id],
         id=f"manual_{task_id}_{int(datetime.now().timestamp())}",
         name=f"Manual Run: {task['name']}",
         misfire_grace_time=None
     )
     log_to_app(f"Manual invocation for task ID {task_id} dispatched to the queue thread pool.")
-    return {"message": "Task sent to the processing queue sequential pool successfully."}
+    return {"message": "Task sent to the processing queue pool successfully."}
 
 @app.post("/api/tasks/{task_id}/stop", dependencies=[Depends(verify_api_key)])
 def stop_task(task_id: int):
