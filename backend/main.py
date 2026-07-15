@@ -109,10 +109,20 @@ def log_to_app(message: str):
     
     logger.info(message)
 
-def send_notification(task_name: str, status: str, discord_url: str = None, ntfy_url: str = None):
+def send_notification(task_name: str, status: str, discord_url: str = None, ntfy_url: str = None, skipped_files: list = None):
     emoji = "✅" if status in ["OK", "SUKCES"] else "❌"
+    
+    # Podstawowa wiadomość
     msg = f"{emoji} Zadanie '{task_name}' zakończyło się statusem: {status}."
     
+    # Jeśli mamy pominięte pliki, doklejamy je do wiadomości na Discorda
+    if skipped_files:
+        msg += "\n\n⚠️ **Wykryto zbyt długie ścieżki (Pominięte przez OneDrive - limit 400 znaków):**"
+        for file_path in skipped_files[:10]:  # Pokazujemy max 10 pierwszych, żeby nie zatkać Discorda
+            msg += f"\n• `{file_path}`"
+        if len(skipped_files) > 10:
+            msg += f"\n... i {len(skipped_files) - 10} więcej. Sprawdź pełny log zadania."
+
     if discord_url and discord_url not in ["string", "null", "None", ""]:
         try:
             payload = json.dumps({"content": msg}).encode("utf-8")
@@ -121,21 +131,23 @@ def send_notification(task_name: str, status: str, discord_url: str = None, ntfy
                 data=payload, 
                 headers={
                     "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                    "User-Agent": "Mozilla/5.0"
                 }
             )
             with urllib.request.urlopen(req) as res: pass
         except Exception as e: log_to_app(f"Błąd powiadomienia Discord: {str(e)}")
 
+    # ntfy (prostszas wersja, bez markdowna)
     if ntfy_url and ntfy_url not in ["string", "null", "None", ""]:
         try:
-            payload = msg.encode("utf-8")
+            ntfy_msg = msg.replace("**", "").replace("`", "")
+            payload = ntfy_msg.encode("utf-8")
             req = urllib.request.Request(
                 ntfy_url, 
                 data=payload, 
                 headers={
                     "Title": f"Backup: {task_name}",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                    "User-Agent": "Mozilla/5.0"
                 }
             )
             with urllib.request.urlopen(req) as res: pass
@@ -216,14 +228,22 @@ def clean_all_trash_folders_cron():
                             pass
 
 # --- SILNIK BACKUPU ---
-def execute_backup_process(task: dict):
+def execute_backup_process(task_id: int):
+    # 1. Pobieramy najświeższy config z bazy na samym starcie wątku
     config = get_all_tasks()
+    task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
+    
+    if not task:
+        log_to_app(f"Błąd uruchomienia: Zadanie o ID {task_id} nie istnieje w bazie config.json.")
+        return
+
+    # 2. Ustawiamy status RUNNING
     for t in config.get("tasks", []):
-        if t["id"] == task["id"]:
+        if t["id"] == task_id:
             t["status"] = "RUNNING"
             break
     save_config(config)
-
+    
     task_name_slug = task["name"].replace(" ", "_").lower()
     task_log_dir = os.path.join(LOGS_BASE_DIR, task_name_slug)
     os.makedirs(task_log_dir, exist_ok=True)
@@ -265,12 +285,10 @@ def execute_backup_process(task: dict):
         else:
             cmd.append("copy")
             
-        # --- POPRAWKA: POPRAWNE SPRAWDZANIE FLAG (ZADANIE -> GLOBALNE -> FALLBACK) ---
         global_config = get_all_tasks()
         settings = global_config.get("settings", {})
         
         rclone_flags = task.get("custom_flags")
-        # Jeśli klucz w ogóle nie istnieje (stare zadania), rclone_flags będzie None
         if rclone_flags is None:
             rclone_flags = settings.get("rclone_flags", ["--buffer-size=16M", "--transfers=2"])
         
@@ -290,38 +308,73 @@ def execute_backup_process(task: dict):
             log_file.flush()
             
             process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, text=True)
-            active_backup_processes[task["id"]] = process
+            active_backup_processes[task_id] = process  # Używamy bezpiecznego task_id
             process.wait()
             
-        active_backup_processes.pop(task["id"], None)
+        active_backup_processes.pop(task_id, None)  # Używamy bezpiecznego task_id
             
-        # Sprawdzamy czy status w bazie nie został już zmieniony na "Zatrzymane" przez endpoint STOP
+        # Sprawdzamy czy zadanie nie zostało zatrzymane przez użytkownika
         current_config = get_all_tasks()
-        task_in_db = next((t for t in current_config.get("tasks", []) if t["id"] == task["id"]), None)
+        task_in_db = next((t for t in current_config.get("tasks", []) if t["id"] == task_id), None)
             
         if task_in_db and task_in_db.get("status") == "Zatrzymane":
             log_to_app(f"Zadanie '{task['name']}' zostało przerwane na żądanie użytkownika.")
-            return  # Przerywamy wykonywanie, nie nadpisujemy statusu i nie dublujemy powiadomień
+            return
                 
-        # Jeśli to był naturalny koniec procesu:
         final_status = "OK" if process.returncode == 0 else "Błąd"
-            
+        skipped_onedrive_files = []
+
+        if task["type"] == "cloud" and final_status == "Błąd" and os.path.exists(log_file_path):
+            try:
+                has_other_errors = False
+                with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if "ERROR :" in line:
+                            if (
+                                "not deleting directories as there were IO errors" in line or 
+                                "not deleting files as there were IO errors" in line or 
+                                "Can't retry any of the errors" in line
+                            ):
+                                continue
+
+                            if "pathIsTooLong" in line or "The specified file or folder name is too long" in line:
+                                parts = line.split("ERROR :")
+                                if len(parts) > 1:
+                                    file_part = parts[1].split(":")[0].strip()
+                                    if file_part and file_part not in skipped_onedrive_files:
+                                        skipped_onedrive_files.append(file_part)
+                            else:
+                                has_other_errors = True
+                
+                if len(skipped_onedrive_files) > 0 and not has_other_errors:
+                    log_to_app(f"Zadanie '{task['name']}': Wykryto {len(skipped_onedrive_files)} błędów typu 'pathIsTooLong'. Brak innych błędów. Status złagodzony do 'OK'.")
+                    final_status = "OK"
+            except Exception as parse_error:
+                log_to_app(f"Błąd podczas parsowania logu OneDrive: {str(parse_error)}")
+
+        # Zapisujemy finalny status
         config = get_all_tasks()
         for t in config.get("tasks", []):
-            if t["id"] == task["id"]:
+            if t["id"] == task_id:
                 t["status"] = final_status
                 break
         save_config(config)
             
         log_to_app(f"Zadanie {task['name']} zakończone status: {final_status}.")
-        send_notification(task["name"], final_status, discord_url=task.get("discord_webhook"), ntfy_url=task.get("ntfy_url"))
+        
+        # Powiadomienie Discord/Ntfy
+        send_notification(
+            task["name"], 
+            final_status, 
+            discord_url=task.get("discord_webhook"), 
+            ntfy_url=task.get("ntfy_url"),
+            skipped_files=skipped_onedrive_files if len(skipped_onedrive_files) > 0 else None
+        )
             
-        #if final_status == "OK":
-        #    clean_old_trash_folders(task)
         if final_status in ["OK", "SUCCESS"]:
             clean_old_trash_folders(task)
             
-            # --- NOWOŚĆ: AUTOMATYCZNE URUCHAMIANIE ZADANIA ZALEŻNEGO ---
+            # Autouruchamianie zadania zależnego (łańcuch)
             next_id = task.get("next_task_id")
             if next_id:
                 all_tasks_config = get_all_tasks()
@@ -330,27 +383,36 @@ def execute_backup_process(task: dict):
                 if next_task:
                     log_to_app(f"Łańcuch zadań: Zadanie '{task['name']}' zakończone sukcesem. Automatyczne wywoływanie kolejnego zadania ID {next_id}: '{next_task['name']}'.")
                     
-                    # Wrzucamy kolejne zadanie do kolejki Schedulera
                     scheduler.add_job(
                         execute_backup_process, 
-                        args=[next_task], 
+                        args=[next_task["id"]], 
                         id=f"chained_{next_id}_{int(datetime.now().timestamp())}", 
-                        name=f"Chained Run: {next_task['name']}"
+                        name=f"Chained Run: {next_task['name']}",
+                        misfire_grace_time=None  # <-- DODAJ TO
                     )
                 else:
                     log_to_app(f"Łańcuch zadań ostrzeżenie: Zadanie '{task['name']}' wskazuje na następne ID {next_id}, ale takie zadanie nie istnieje w config.json.")
-            # -----------------------------------------------------------
+
     except Exception as e:
         config = get_all_tasks()
         for t in config.get("tasks", []):
-            if t["id"] == task["id"]:
+            if t["id"] == task_id:
                 t["status"] = "Błąd"
                 break
         save_config(config)
-        log_to_app(f"Krytyczny błąd {task['name']}: {str(e)}")
+        log_to_app(f"Krytyczny błąd {task.get('name', f'ID {task_id}')}: {str(e)}")
 
 # --- SILNIK RESTORE ---
-def execute_restore_process(task: dict):
+def execute_restore_process(task_id: int):  # <-- ZMIANA: przyjmujemy task_id zamiast słownika task
+    # Pobieramy najświeższą konfigurację zadania z pliku JSON
+    config = get_all_tasks()
+    task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
+    
+    if not task:
+        log_to_app(f"Błąd przywracania: Zadanie o ID {task_id} nie istnieje w bazie config.json.")
+        return
+
+    # Od tego miejsca kod pozostaje niemal bez zmian, korzystając ze zmiennej 'task'
     task_name_slug = task["name"].replace(" ", "_").lower()
     task_log_dir = os.path.join(LOGS_BASE_DIR, task_name_slug)
     os.makedirs(task_log_dir, exist_ok=True)
@@ -402,7 +464,8 @@ def add_task_to_scheduler(task: dict):
     try:
         trigger = CronTrigger.from_crontab(task["schedule"])
         scheduler.add_job(
-            execute_backup_process, trigger=trigger, args=[task],
+            #execute_backup_process, trigger=trigger, args=[task],
+            execute_backup_process, trigger=trigger, args=[task["id"]],
             id=str(task["id"]), name=task["name"], replace_existing=True
         )
         log_to_app(f"Zarejestrowano w harmonogramie: '{task['name']}' ({task['schedule']})")
@@ -507,10 +570,11 @@ def run_task(task_id: int):
     if not task: raise HTTPException(status_code=404, detail="Brak zadania")
     
     scheduler.add_job(
-        execute_backup_process, 
-        args=[task], 
-        id=f"manual_{task_id}_{int(datetime.now().timestamp())}", 
-        name=f"Manual Run: {task['name']}"
+        execute_backup_process,
+        args=[task_id],
+        id=f"manual_{task_id}_{int(datetime.now().timestamp())}",
+        name=f"Manual Run: {task['name']}",
+        misfire_grace_time=None  # <-- DODAJ TO: zadanie wykona się niezależnie od czasu oczekiwania w kolejce
     )
     log_to_app(f"Ręczne wywołanie zadania ID {task_id} dodane do kolejki wątków.")
     return {"message": "Zadanie przekazane do kolejki wykonawczej (wykonywanie jedno po drugim)."}
@@ -583,9 +647,10 @@ def restore_task(task_id: int):
         
     scheduler.add_job(
         execute_restore_process, 
-        args=[task], 
+        args=[task_id],  # <-- POPRAWKA: Przekazujemy tylko task_id
         id=f"manual_restore_{task_id}_{int(datetime.now().timestamp())}", 
-        name=f"Manual Restore: {task['name']}"
+        name=f"Manual Restore: {task['name']}",
+        misfire_grace_time=None  # <-- DODAJ TO
     )
     log_to_app(f"Ręczne przywracanie zadania ID {task_id} dodane do kolejki wątków.")
     return {"message": "Przywracanie przekazane do kolejki wykonawczej."}

@@ -2,22 +2,18 @@ import os
 import json
 import subprocess
 import urllib.request
-
 import bcrypt
 import jwt
-
-import time                                 # <-- REQUIRED for time.time()
-import logging                              # <-- REQUIRED for logging
-from logging.handlers import RotatingFileHandler  # <-- REQUIRED for log rotation
-
+import time
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, Depends
+from fastapi import FastAPI, HTTPException, Security, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-# THREAD POOL EXECUTOR IMPORT FOR TASK QUEUING
 from apscheduler.executors.pool import ThreadPoolExecutor
 
 from fastapi.security.api_key import APIKeyHeader
@@ -25,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Docker Backup Manager API")
 
-# Fetch environment variables from .env
+# Environment variables
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 DISABLE_REGISTRATION = os.getenv("DISABLE_REGISTRATION", "false").lower() == "true"
@@ -43,7 +39,7 @@ class RegisterSchema(BaseModel):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow traffic from local network devices
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -63,17 +59,17 @@ def verify_api_key(api_key: str = Depends(api_key_header)):
     if api_key != API_KEY_SECRET:
         raise HTTPException(
             status_code=403, 
-            detail="Access Denied: Invalid or missing API key (X-API-Key)."
+            detail="Access Denied: Invalid or missing API Key (X-API-Key)."
         )
     return api_key
 
-# --- TASK QUEUING CONFIGURATION FOR NAS ---
+# --- TASK QUEUE CONFIGURATION FOR NAS ---
 executors = {
     'default': ThreadPoolExecutor(max_workers=1)
 }
 scheduler = BackgroundScheduler(executors=executors)
 
-# Stores references to active system processes {task_id: subprocess.Popen}
+# Process tracking mapping
 active_backup_processes = {}
 
 # --- DATA VALIDATION SCHEMA ---
@@ -84,20 +80,18 @@ class TaskSchema(BaseModel):
     type: str                  # "local" or "cloud"
     mode: str                  # "mirror", "incremental", "move"
     schedule: str              # Cron expression, e.g., "0 3 * * *"
-    enabled: bool = True       # Active in scheduler
-    restore_enabled: bool = False # Safety switch for Restore
-    exclude: List[str] = []    # Ignored files/folders
-    retention_days: int = 0    # Number of trash versions to keep (0 = disabled)
+    enabled: bool = True       # Active in schedule
+    restore_enabled: bool = False
+    exclude: List[str] = []
+    retention_days: int = 0    # 0 = disabled
     discord_webhook: Optional[str] = None
     ntfy_url: Optional[str] = None
-    custom_flags: Optional[List[str]] = []  # <-- CUSTOM RCLONE FLAGS PER TASK
-    next_task_id: Optional[int] = None  # <-- NOWE POLE: ID następnego zadania (np. 3)
+    custom_flags: Optional[List[str]] = []
+    next_task_id: Optional[int] = None
 
 # --- HELPER FUNCTIONS ---
 def log_to_app(message: str):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     os.makedirs(os.path.dirname(APP_LOG_PATH), exist_ok=True)
-    
     logger = logging.getLogger("AppLogger")
     
     if not logger.handlers:
@@ -109,10 +103,17 @@ def log_to_app(message: str):
     
     logger.info(message)
 
-def send_notification(task_name: str, status: str, discord_url: str = None, ntfy_url: str = None):
-    emoji = "✅" if status in ["OK", "SUKCES", "SUCCESS"] else "❌"
+def send_notification(task_name: str, status: str, discord_url: str = None, ntfy_url: str = None, skipped_files: list = None):
+    emoji = "✅" if status in ["OK", "SUCCESS"] else "❌"
     msg = f"{emoji} Task '{task_name}' finished with status: {status}."
     
+    if skipped_files:
+        msg += "\n\n⚠️ **Paths too long detected (Skipped by OneDrive - 400 characters limit):**"
+        for file_path in skipped_files[:10]:
+            msg += f"\n• `{file_path}`"
+        if len(skipped_files) > 10:
+            msg += f"\n... and {len(skipped_files) - 10} more. Check the full task log."
+
     if discord_url and discord_url not in ["string", "null", "None", ""]:
         try:
             payload = json.dumps({"content": msg}).encode("utf-8")
@@ -121,7 +122,7 @@ def send_notification(task_name: str, status: str, discord_url: str = None, ntfy
                 data=payload, 
                 headers={
                     "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                    "User-Agent": "Mozilla/5.0"
                 }
             )
             with urllib.request.urlopen(req) as res: pass
@@ -129,13 +130,14 @@ def send_notification(task_name: str, status: str, discord_url: str = None, ntfy
 
     if ntfy_url and ntfy_url not in ["string", "null", "None", ""]:
         try:
-            payload = msg.encode("utf-8")
+            ntfy_msg = msg.replace("**", "").replace("`", "")
+            payload = ntfy_msg.encode("utf-8")
             req = urllib.request.Request(
                 ntfy_url, 
                 data=payload, 
                 headers={
                     "Title": f"Backup: {task_name}",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                    "User-Agent": "Mozilla/5.0"
                 }
             )
             with urllib.request.urlopen(req) as res: pass
@@ -151,13 +153,13 @@ def get_all_tasks():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
-# --- AUTOMATIC TRASH CLEANING (VERSION RETENTION) ---
+# --- TRASH RETENTION SERVICE ---
 def clean_old_trash_folders(task: dict):
     retention_limit = task.get("retention_days", 0)
     if retention_limit <= 0:
         return
 
-    log_to_app(f"Trash cleanup triggered for task '{task['name']}' (Retention limit: {retention_limit}).")
+    log_to_app(f"Starting trash cleanup for task '{task['name']}' (Retention limit: {retention_limit}).")
 
     if task["type"] == "local":
         trash_base = task["destination"].rstrip("/") + "-trash"
@@ -172,7 +174,7 @@ def clean_old_trash_folders(task: dict):
                 subprocess.run(["rm", "-rf", oldest_folder])
                 log_to_app(f"Local Retention: Removed oldest trash folder: {oldest_folder}")
         except Exception as e:
-            log_to_app(f"Local trash cleanup error: {str(e)}")
+            log_to_app(f"Local retention error: {str(e)}")
 
     elif task["type"] == "cloud":
         trash_base = task["destination"].rstrip("/") + "-trash"
@@ -189,17 +191,16 @@ def clean_old_trash_folders(task: dict):
                 subprocess.run(["rclone", f"--config={RCLONE_CONFIG_PATH}", "purge", full_remote_trash_path])
                 log_to_app(f"Cloud Retention: Removed oldest trash folder: {full_remote_trash_path}")
         except Exception as e:
-            log_to_app(f"Cloud trash cleanup error: {str(e)}")
+            log_to_app(f"Cloud retention error: {str(e)}")
 
 def clean_all_trash_folders_cron():
-    log_to_app("Scheduler: Started nightly trash retention process for all tasks.")
+    log_to_app("Scheduler: Running nightly trash cleanup for all tasks.")
     config = get_all_tasks()
     for task in config.get("tasks", []):
         if task.get("enabled", True) and task.get("retention_days", 0) > 0:
             clean_old_trash_folders(task)
             
-    # --- LOG ROTATION SECTOR (OLDER THAN 365 DAYS) ---
-    log_to_app("Scheduler: Started log cleanup for files older than 365 days.")
+    log_to_app("Scheduler: Rotating log files older than 365 days.")
     now = time.time()
     cutoff = now - (365 * 24 * 60 * 60)
     
@@ -216,14 +217,22 @@ def clean_all_trash_folders_cron():
                             pass
 
 # --- BACKUP ENGINE ---
-def execute_backup_process(task: dict):
+def execute_backup_process(task_id: int):
+    # 1. Fetch freshest config from file upon thread start
     config = get_all_tasks()
+    task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
+    
+    if not task:
+        log_to_app(f"Execution Error: Task ID {task_id} does not exist in config.json.")
+        return
+
+    # 2. Set task status to RUNNING
     for t in config.get("tasks", []):
-        if t["id"] == task["id"]:
+        if t["id"] == task_id:
             t["status"] = "RUNNING"
             break
     save_config(config)
-
+    
     task_name_slug = task["name"].replace(" ", "_").lower()
     task_log_dir = os.path.join(LOGS_BASE_DIR, task_name_slug)
     os.makedirs(task_log_dir, exist_ok=True)
@@ -232,7 +241,7 @@ def execute_backup_process(task: dict):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file_path = os.path.join(task_log_dir, f"{timestamp}.log")
     
-    log_to_app(f"Starting task ({task['type']} - {task.get('mode', 'mirror')}): {task['name']}.")
+    log_to_app(f"Launching task ({task['type']} - {task.get('mode', 'mirror')}): {task['name']}.")
     cmd = []
     
     if task["type"] == "local":
@@ -265,7 +274,6 @@ def execute_backup_process(task: dict):
         else:
             cmd.append("copy")
             
-        # --- DYNAMIC FLAG INJECTION (TASK -> GLOBAL -> FALLBACK) ---
         global_config = get_all_tasks()
         settings = global_config.get("settings", {})
         
@@ -289,67 +297,109 @@ def execute_backup_process(task: dict):
             log_file.flush()
             
             process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, text=True)
-            active_backup_processes[task["id"]] = process
+            active_backup_processes[task_id] = process
             process.wait()
             
-        active_backup_processes.pop(task["id"], None)
+        active_backup_processes.pop(task_id, None)
             
-        # Check if the task status in the config file was modified to "STOPPED" by the stop endpoint
+        # Check if the process was explicitly stopped by user
         current_config = get_all_tasks()
-        task_in_db = next((t for t in current_config.get("tasks", []) if t["id"] == task["id"]), None)
+        task_in_db = next((t for t in current_config.get("tasks", []) if t["id"] == task_id), None)
             
-        if task_in_db and task_in_db.get("status") == "STOPPED":
-            log_to_app(f"Task '{task['name']}' was manually terminated by the user.")
-            return  # Exit process without rewriting status data or triggering duplicate signals
+        if task_in_db and task_in_db.get("status") in ["Stopped", "Zatrzymane"]:
+            log_to_app(f"Task '{task['name']}' was stopped by user request.")
+            return
                 
-        # Natural exit path handler:
-        final_status = "SUCCESS" if process.returncode == 0 else "ERROR"
-            
+        final_status = "OK" if process.returncode == 0 else "Błąd"
+        skipped_onedrive_files = []
+
+        if task["type"] == "cloud" and final_status == "Błąd" and os.path.exists(log_file_path):
+            try:
+                has_other_errors = False
+                with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if "ERROR :" in line:
+                            if (
+                                "not deleting directories as there were IO errors" in line or 
+                                "not deleting files as there were IO errors" in line or 
+                                "Can't retry any of the errors" in line
+                            ):
+                                continue
+
+                            if "pathIsTooLong" in line or "The specified file or folder name is too long" in line:
+                                parts = line.split("ERROR :")
+                                if len(parts) > 1:
+                                    file_part = parts[1].split(":")[0].strip()
+                                    if file_part and file_part not in skipped_onedrive_files:
+                                        skipped_onedrive_files.append(file_part)
+                            else:
+                                has_other_errors = True
+                
+                if len(skipped_onedrive_files) > 0 and not has_other_errors:
+                    log_to_app(f"Task '{task['name']}': Detected {len(skipped_onedrive_files)} 'pathIsTooLong' errors. No other issues found. Status mitigated to 'OK'.")
+                    final_status = "OK"
+            except Exception as parse_error:
+                log_to_app(f"Error parsing OneDrive log: {str(parse_error)}")
+
+        # Save final status
         config = get_all_tasks()
         for t in config.get("tasks", []):
-            if t["id"] == task["id"]:
+            if t["id"] == task_id:
                 t["status"] = final_status
                 break
         save_config(config)
+            
+        log_to_app(f"Task {task['name']} finished with status: {final_status}.")
         
-        log_to_app(f"Task '{task['name']}' finished with status: {final_status}.")
-        send_notification(task["name"], final_status, discord_url=task.get("discord_webhook"), ntfy_url=task.get("ntfy_url"))
-        
-        #if final_status == "SUCCESS":
-        #    clean_old_trash_folders(task)
+        # Dispatch notification
+        send_notification(
+            task["name"], 
+            final_status, 
+            discord_url=task.get("discord_webhook"), 
+            ntfy_url=task.get("ntfy_url"),
+            skipped_files=skipped_onedrive_files if len(skipped_onedrive_files) > 0 else None
+        )
+            
         if final_status in ["OK", "SUCCESS"]:
             clean_old_trash_folders(task)
             
-            # --- NOWOŚĆ: AUTOMATYCZNE URUCHAMIANIE ZADANIA ZALEŻNEGO ---
+            # Dependent task task-chain execution
             next_id = task.get("next_task_id")
             if next_id:
                 all_tasks_config = get_all_tasks()
                 next_task = next((t for t in all_tasks_config.get("tasks", []) if t["id"] == next_id), None)
                 
                 if next_task:
-                    log_to_app(f"Łańcuch zadań: Zadanie '{task['name']}' zakończone sukcesem. Automatyczne wywoływanie kolejnego zadania ID {next_id}: '{next_task['name']}'.")
+                    log_to_app(f"Task Chain: Task '{task['name']}' finished successfully. Automatically calling dependent task ID {next_id}: '{next_task['name']}'.")
                     
-                    # Wrzucamy kolejne zadanie do kolejki Schedulera
                     scheduler.add_job(
                         execute_backup_process, 
-                        args=[next_task], 
+                        args=[next_task["id"]], 
                         id=f"chained_{next_id}_{int(datetime.now().timestamp())}", 
-                        name=f"Chained Run: {next_task['name']}"
+                        name=f"Chained Run: {next_task['name']}",
+                        misfire_grace_time=None
                     )
                 else:
-                    log_to_app(f"Łańcuch zadań ostrzeżenie: Zadanie '{task['name']}' wskazuje na następne ID {next_id}, ale takie zadanie nie istnieje w config.json.")
-            # -----------------------------------------------------------
+                    log_to_app(f"Task Chain Warning: Task '{task['name']}' points to next ID {next_id}, but that task does not exist in config.json.")
+
     except Exception as e:
         config = get_all_tasks()
         for t in config.get("tasks", []):
-            if t["id"] == task["id"]:
-                t["status"] = "ERROR"
+            if t["id"] == task_id:
+                t["status"] = "Błąd"
                 break
         save_config(config)
-        log_to_app(f"Critical error in task '{task['name']}': {str(e)}")
+        log_to_app(f"Critical error on {task.get('name', f'ID {task_id}')}: {str(e)}")
 
 # --- RESTORE ENGINE ---
-def execute_restore_process(task: dict):
+def execute_restore_process(task_id: int):
+    config = get_all_tasks()
+    task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
+    
+    if not task:
+        log_to_app(f"Restore Error: Task ID {task_id} does not exist in config.json.")
+        return
+
     task_name_slug = task["name"].replace(" ", "_").lower()
     task_log_dir = os.path.join(LOGS_BASE_DIR, task_name_slug)
     os.makedirs(task_log_dir, exist_ok=True)
@@ -357,7 +407,7 @@ def execute_restore_process(task: dict):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_RESTORE")
     log_file_path = os.path.join(task_log_dir, f"{timestamp}.log")
     
-    log_to_app(f"Starting DATA RESTORE procedure for task: {task['name']}.")
+    log_to_app(f"Starting RESTORE procedure for task: {task['name']}.")
     
     if task["type"] == "local":
         os.makedirs(task["source"], exist_ok=True)
@@ -366,7 +416,6 @@ def execute_restore_process(task: dict):
     elif task["type"] == "cloud":
         cmd = ["rclone", f"--config={RCLONE_CONFIG_PATH}", "copy", task["destination"], task["source"], "-v"]
         
-        # --- INJECT DYNAMIC OPTIMIZATION FLAGS TO RESTORE ENGINE ---
         global_config = get_all_tasks()
         settings = global_config.get("settings", {})
         rclone_flags = task.get("custom_flags")
@@ -384,13 +433,13 @@ def execute_restore_process(task: dict):
             log_file.flush()
             process = subprocess.run(cmd, stdout=log_file, stderr=log_file, text=True)
             
-        status = "SUCCESS" if process.returncode == 0 else "ERROR"
-        log_to_app(f"Restore procedure for '{task['name']}' finished: {status}.")
+        status = "SUKCES" if process.returncode == 0 else "BŁĄD"
+        log_to_app(f"Restore of {task['name']} completed: {status}.")
         send_notification(f"RESTORE: {task['name']}", status, discord_url=task.get("discord_webhook"), ntfy_url=task.get("ntfy_url"))
     except Exception as e:
-        log_to_app(f"Restore system error for '{task['name']}': {str(e)}")
+        log_to_app(f"Restore operation failed for {task['name']}: {str(e)}")
 
-# --- SCHEDULER ENGINE ---
+# --- SCHEDULER LIFECYCLE BINDINGS ---
 def add_task_to_scheduler(task: dict):
     if not task.get("enabled", True):
         if scheduler.get_job(str(task["id"])):
@@ -400,12 +449,12 @@ def add_task_to_scheduler(task: dict):
     try:
         trigger = CronTrigger.from_crontab(task["schedule"])
         scheduler.add_job(
-            execute_backup_process, trigger=trigger, args=[task],
+            execute_backup_process, trigger=trigger, args=[task["id"]],
             id=str(task["id"]), name=task["name"], replace_existing=True
         )
         log_to_app(f"Registered in scheduler: '{task['name']}' ({task['schedule']})")
     except Exception as e:
-        log_to_app(f"Scheduler registration failed for '{task['name']}': {str(e)}")
+        log_to_app(f"Scheduler registration error for '{task['name']}': {str(e)}")
 
 def load_all_tasks_into_scheduler():
     config = get_all_tasks()
@@ -417,21 +466,20 @@ def load_all_tasks_into_scheduler():
 
 @app.on_event("startup")
 def startup_event():
-    # --- NEW: CLEAR HANGING RUNNING STATUSES ON STARTUP ---
+    # Clear active states from dangling items on runtime restart
     config = get_all_tasks()
     status_changed = False
     for task in config.get("tasks", []):
         if task.get("status") == "RUNNING":
-            task["status"] = "ERROR"
-            log_to_app(f"System: Detected hanging task ID {task['id']} ('{task['name']}') in RUNNING state. Reset to 'ERROR' due to container restart.")
+            task["status"] = "Błąd"
+            log_to_app(f"System: Hanging task ID {task['id']} ('{task['name']}') found in RUNNING state. Recovered to 'Błąd' status after container reboot.")
             status_changed = True
     if status_changed:
         save_config(config)
-    # ------------------------------------------------------
 
     load_all_tasks_into_scheduler()
     scheduler.start()
-    log_to_app("Scheduler engine and trash retention services started successfully (Queue system operational).")
+    log_to_app("Scheduler engine and trash retention services started successfully (Queue operational).")
 
 @app.on_event("shutdown")
 def shutdown_event():
@@ -449,7 +497,7 @@ def create_task(task: TaskSchema):
     new_id = max(existing_ids) + 1 if existing_ids else 1
     
     if task.type == "local" and not os.path.exists(task.source):
-        raise HTTPException(status_code=400, detail=f"Source directory not found: {task.source}")
+        raise HTTPException(status_code=400, detail=f"Directory path does not exist: {task.source}")
     elif task.type == "cloud" and not os.path.exists(task.destination) and not task.destination.startswith("http"):
         os.makedirs(task.destination, exist_ok=True)
         
@@ -460,7 +508,7 @@ def create_task(task: TaskSchema):
     config.setdefault("tasks", []).append(new_task)
     save_config(config)
     add_task_to_scheduler(new_task)
-    log_to_app(f"Created backup task: {task.name}")
+    log_to_app(f"Created task: {task.name}")
     return {"task": new_task}
 
 @app.put("/api/tasks/{task_id}", dependencies=[Depends(verify_api_key)])
@@ -472,7 +520,7 @@ def update_task(task_id: int, fields: TaskSchema):
     if idx is None: raise HTTPException(status_code=404, detail="Task not found")
     
     if fields.type == "local" and not os.path.exists(fields.source):
-        raise HTTPException(status_code=400, detail="Source directory not found")
+        raise HTTPException(status_code=400, detail="Source path does not exist")
     elif fields.type == "cloud" and not os.path.exists(fields.destination):
         os.makedirs(fields.destination, exist_ok=True)
     
@@ -496,7 +544,7 @@ def delete_task(task_id: int):
     save_config(config)
     if scheduler.get_job(str(task_id)): scheduler.remove_job(str(task_id))
     log_to_app(f"Deleted task ID {task_id}.")
-    return {"message": "Task deleted successfully"}
+    return {"message": "Task successfully deleted"}
 
 @app.post("/api/tasks/{task_id}/run", dependencies=[Depends(verify_api_key)])
 def run_task(task_id: int):
@@ -506,16 +554,16 @@ def run_task(task_id: int):
     
     scheduler.add_job(
         execute_backup_process, 
-        args=[task], 
-        id=f"manual_{task_id}_{int(datetime.now().timestamp())}", 
-        name=f"Manual Run: {task['name']}"
+        args=[task_id],
+        id=f"manual_{task_id}_{int(datetime.now().timestamp())}",
+        name=f"Manual Run: {task['name']}",
+        misfire_grace_time=None
     )
-    log_to_app(f"Manual invocation for task ID {task_id} added to the execution thread pool.")
-    return {"message": "Task forwarded to execution queue (processing tasks sequentially)."}
+    log_to_app(f"Manual invocation for task ID {task_id} dispatched to the queue thread pool.")
+    return {"message": "Task sent to the processing queue sequential pool successfully."}
 
 @app.post("/api/tasks/{task_id}/stop", dependencies=[Depends(verify_api_key)])
 def stop_task(task_id: int):
-    # Fetch task settings to gain access to name parameters and webhooks
     config = get_all_tasks()
     task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
     if not task: 
@@ -525,51 +573,47 @@ def stop_task(task_id: int):
     
     if process:
         try:
-            log_to_app(f"Stop requested for task ID {task_id}. Transmitting termination signals.")
+            log_to_app(f"Termination requested for task ID {task_id}. Dispatching kill signal.")
             
-            # 1. Fire custom termination webhook alert instead of the error fallback
             send_notification(
                 task["name"], 
-                "Stopped on demand 🛑", 
+                "Zatrzymane na żądanie 🛑", 
                 discord_url=task.get("discord_webhook"), 
                 ntfy_url=task.get("ntfy_url")
             )
             
-            # 2. Assign the specific "STOPPED" tracking state to database configuration 
             config = get_all_tasks()
             for t in config.get("tasks", []):
                 if t["id"] == task_id:
-                    t["status"] = "STOPPED"
+                    t["status"] = "Zatrzymane"
                     break
             save_config(config)
             
-            # 3. Cease system level subprocess
             process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
                 
-            return {"message": "Task process terminated forcefully."}
+            return {"message": "Task forced to terminate successfully."}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to kill running subprocess: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error stopping backend task thread process: {str(e)}")
             
-    # Subprocess entry absent from memory dictionary but registered database value reads RUNNING
     config = get_all_tasks()
     for t in config.get("tasks", []):
         if t["id"] == task_id and t["status"] == "RUNNING":
-            t["status"] = "STOPPED"
+            t["status"] = "Zatrzymane"
             save_config(config)
-            log_to_app(f"Manually cleared hanging RUNNING status for task ID {task_id}.")
+            log_to_app(f"Manual status reset executed for hanging RUNNING task ID {task_id}.")
             send_notification(
                 task["name"], 
-                "Stopped on demand 🛑", 
+                "Zatrzymane na żądanie 🛑", 
                 discord_url=task.get("discord_webhook"), 
                 ntfy_url=task.get("ntfy_url")
             )
-            return {"message": "Process wasn't active. Task status reset to 'STOPPED'."}
+            return {"message": "Process wasn't running inside active memory pool. State purged back to Stopped position."}
             
-    raise HTTPException(status_code=400, detail="This task is not currently active.")
+    raise HTTPException(status_code=400, detail="This task is not currently running.")
 
 @app.post("/api/tasks/{task_id}/restore", dependencies=[Depends(verify_api_key)])
 def restore_task(task_id: int):
@@ -577,16 +621,17 @@ def restore_task(task_id: int):
     task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
     if not task: raise HTTPException(status_code=404, detail="Task not found")
     if not task.get("restore_enabled", False):
-        raise HTTPException(status_code=400, detail="Data restore is locked in task configuration.")
+        raise HTTPException(status_code=400, detail="Restore options are locked within task attributes configuration.")
         
     scheduler.add_job(
         execute_restore_process, 
-        args=[task], 
+        args=[task_id], 
         id=f"manual_restore_{task_id}_{int(datetime.now().timestamp())}", 
-        name=f"Manual Restore: {task['name']}"
+        name=f"Manual Restore: {task['name']}",
+        misfire_grace_time=None
     )
-    log_to_app(f"Manual restore request for task ID {task_id} dispatched to thread pool.")
-    return {"message": "Restore procedure submitted to execution queue."}
+    log_to_app(f"Manual restore request for task ID {task_id} pushed into execution thread pool queue.")
+    return {"message": "Restore process dispatched to queue pipeline successfully."}
 
 @app.get("/api/tasks/{task_id}/logs", dependencies=[Depends(verify_api_key)])
 def get_task_logs(task_id: int):
@@ -599,12 +644,12 @@ def get_task_logs(task_id: int):
     task_log_dir = os.path.join(LOGS_BASE_DIR, task_name_slug)
     
     if not os.path.exists(task_log_dir):
-        return {"logs": "No logs recorded for this task. It hasn't been executed yet."}
+        return {"logs": "No log assets recorded for this task yet. It has not been run."}
         
     try:
         log_files = [os.path.join(task_log_dir, f) for f in os.listdir(task_log_dir) if f.endswith(".log")]
         if not log_files:
-            return {"logs": "Log directory is empty."}
+            return {"logs": "No active log files present inside specific folder directory."}
             
         latest_log_path = max(log_files, key=os.path.getmtime)
         
@@ -618,22 +663,21 @@ def get_task_logs(task_id: int):
             "logs": log_content
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Log compilation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error reading task runtime log asset: {str(e)}")
 
 @app.get("/api/browse", dependencies=[Depends(verify_api_key)])
 def browse_folder(path: str = ""):
     full_path = os.path.normpath(os.path.join(BASE_STORAGE, path.lstrip("/")))
     if not full_path.startswith(BASE_STORAGE) or not os.path.exists(full_path):
-        raise HTTPException(status_code=404, detail="Directory path not found")
+        raise HTTPException(status_code=404, detail="Directory folder path not found")
     try:
         directories = [{"name": entry.name, "path": f"/{os.path.relpath(entry.path, BASE_STORAGE)}"} 
                        for entry in os.scandir(full_path) if entry.is_dir()]
         directories.sort(key=lambda x: x["name"].lower())
         return {"current_path": path, "directories": directories}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
-    
-# --- AUTHENTICATION AND REGISTRATION SECTOR ---
 
+# --- AUTHENTICATION ENDPOINTS ---
 @app.post("/api/auth/login")
 def login(credentials: LoginSchema):
     config = get_all_tasks()
@@ -645,7 +689,7 @@ def login(credentials: LoginSchema):
         if credentials.password == ADMIN_PASSWORD:
             token = jwt.encode({"username": ADMIN_USERNAME}, JWT_SECRET, algorithm="HS256")
             return {"token": token, "username": ADMIN_USERNAME}
-        raise HTTPException(status_code=400, detail="Invalid administrator credentials.")
+        raise HTTPException(status_code=400, detail="Invalid administrator password credentials.")
         
     if user:
         password_bytes = credentials.password.encode('utf-8')
@@ -654,18 +698,18 @@ def login(credentials: LoginSchema):
             token = jwt.encode({"username": user["username"]}, JWT_SECRET, algorithm="HS256")
             return {"token": token, "username": user["username"]}
             
-    raise HTTPException(status_code=400, detail="Invalid username or password.")
+    raise HTTPException(status_code=400, detail="Invalid login username or password.")
 
 @app.post("/api/auth/register")
 def register(credentials: RegisterSchema):
     if DISABLE_REGISTRATION:
-        raise HTTPException(status_code=403, detail="New account registrations are blocked by the administrator.")
+        raise HTTPException(status_code=403, detail="New user profiles registration is blocked by administrator settings.")
         
     config = get_all_tasks()
     config.setdefault("users", [])
     
     if any(u["username"] == credentials.username for u in config["users"]):
-        raise HTTPException(status_code=400, detail="A user with this name already exists.")
+        raise HTTPException(status_code=400, detail="Username profile is already taken.")
         
     hashed_password = bcrypt.hashpw(credentials.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     
@@ -676,4 +720,4 @@ def register(credentials: RegisterSchema):
     config["users"].append(new_user)
     save_config(config)
     
-    return {"message": "Account registered successfully."}
+    return {"message": "Account created and registered successfully."}
