@@ -466,7 +466,8 @@ def add_task_to_scheduler(task: dict):
         scheduler.add_job(
             #execute_backup_process, trigger=trigger, args=[task],
             execute_backup_process, trigger=trigger, args=[task["id"]],
-            id=str(task["id"]), name=task["name"], replace_existing=True
+            id=str(task["id"]), name=task["name"], replace_existing=True,
+            misfire_grace_time=None  # <--- DODAJ TĘ LINIĘ TUTAJ!
         )
         log_to_app(f"Zarejestrowano w harmonogramie: '{task['name']}' ({task['schedule']})")
     except Exception as e:
