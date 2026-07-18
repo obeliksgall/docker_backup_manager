@@ -27,7 +27,10 @@
       "retention_days": 7,
       "status": "OK",
       "discord_webhook": "https://discord.com/api/webhooks/example_id/example_token",
-      "ntfy_url": "https://ntfy.sh/my-backup-alerts"
+      "ntfy_url": "https://ntfy.sh/my-backup-alerts",
+      "email_enabled": false,
+      "email_recipients": "",
+      "email_level": "tylko_bledy"
     },
     {
       "id": 2,
@@ -48,7 +51,10 @@
       "retention_days": 30,
       "status": "OK",
       "discord_webhook": "https://discord.com/api/webhooks/example_id/example_token",
-      "ntfy_url": null
+      "ntfy_url": null,
+      "email_enabled": false,
+      "email_recipients": "",
+      "email_level": "tylko_bledy"
     },
     {
       "id": 3,
@@ -71,7 +77,10 @@
       "retention_days": 0,
       "status": null,
       "discord_webhook": null,
-      "ntfy_url": null
+      "ntfy_url": null,
+      "email_enabled": false,
+      "email_recipients": "",
+      "email_level": "tylko_bledy"
     }
   ],
   "users": [
