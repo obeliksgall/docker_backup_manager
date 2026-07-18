@@ -163,6 +163,11 @@ def clean_old_trash_folders(task: dict):
 
     if task["type"] == "local":
         trash_base = task["destination"].rstrip("/") + "-trash"
+        
+        # --- BEZPIECZNIK: Ignoruj, jeśli ścieżka lokalna zawiera dwukropek (to na pewno chmura) ---
+        if ":" in trash_base:
+            return
+            
         if not os.path.exists(trash_base):
             return
         try:
