@@ -6,9 +6,11 @@ import bcrypt
 import jwt
 import time
 import logging
+import smtplib
+
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Security, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -18,6 +20,10 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
+
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication  # Potrzebne do załącznika
 
 app = FastAPI(title="Docker Backup Manager API")
 
@@ -88,6 +94,10 @@ class TaskSchema(BaseModel):
     ntfy_url: Optional[str] = None
     custom_flags: Optional[List[str]] = []
     next_task_id: Optional[int] = None
+    # --- NOWE POLA E-MAIL ---
+    email_enabled: bool = False
+    email_recipients: Optional[str] = ""
+    email_level: str = "wszystkie"  # "wszystkie", "bledy_i_onedrive", "tylko_bledy"
 
 # --- HELPER FUNCTIONS ---
 def log_to_app(message: str):
@@ -142,6 +152,87 @@ def send_notification(task_name: str, status: str, discord_url: str = None, ntfy
             )
             with urllib.request.urlopen(req) as res: pass
         except Exception as e: log_to_app(f"Ntfy notification error: {str(e)}")
+
+def send_email_notification(task_name: str, status: str, recipients_str: str, skipped_files: list = None, log_file_path: str = None):
+    if not SMTP_USER or not SMTP_PASS or not recipients_str:
+        log_to_app("Email warning: Missing SMTP configuration or missing recipients.")
+        return
+
+    try:
+        recipients = [r.strip() for r in recipients_str.split(",") if r.strip()]
+        if not recipients:
+            return
+
+        emoji = "✅" if status in ["OK", "SUKCES"] else "❌"
+        
+        msg = MIMEMultipart()
+        msg["From"] = f"Docker Backup Manager <{SMTP_USER}>"
+        msg["To"] = ", ".join(recipients)
+        msg["Subject"] = f"{emoji} Backup: {task_name} - Status: {status}"
+
+        # --- Podstawowa treść maila ---
+        body = f"Backup task '{task_name}' completed with status: {status}.\n"
+        body += f"Report time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+
+        if skipped_files:
+            body += "⚠️ Files with paths that were too long were skipped. (OneDrive):\n"
+            for file_path in skipped_files:
+                body += f"- {file_path}\n"
+            body += "\n"
+
+        # --- SEKCJA PRZYGOTOWANIA ZAŁĄCZNIKA Z LOGAMI ERROR ---
+        error_content = ""
+        if log_file_path and os.path.exists(log_file_path):
+            error_lines = []
+            try:
+                with open(log_file_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if "ERROR" in line:
+                            # --- BEZPIECZNIK: Ignoruj standardowe ostrzeżenia rclone o IO errors ---
+                            if "not deleting files as there were IO errors" in line:
+                                continue
+                            if "not deleting directories as there were IO errors" in line:
+                                continue
+                            
+                            error_lines.append(line.strip())
+            except Exception as log_err:
+                body += f"[Błąd podczas odczytu pliku logów do załącznika: {str(log_err)}]\n"
+
+            if error_lines:
+                # Tworzymy treść pliku tekstowego ze wszystkimi błędami
+                error_content = f"ERROR REPORT FOR THE TASK: {task_name}\n"
+                error_content += f"Final status: {status}\n"
+                error_content += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                error_content += "--------------------------------------------------\n\n"
+                for err_line in error_lines:
+                    error_content += f"{err_line}\n"
+                
+                body += f"🚨 Errors found in the logs. ({len(error_lines)} line ERROR). The full list is in the attachment..\n"
+            else:
+                body += "ℹ️ No entries containing 'ERROR' were found in the log file.\n"
+
+        # Dołączamy główną treść wiadomości
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        # Jeśli znaleziono błędy, generujemy i dołączamy plik .txt
+        if error_content:
+            attachment = MIMEApplication(error_content.encode("utf-8"), _subtype="txt")
+            # Bezpieczna nazwa pliku bez spacji i dziwnych znaków
+            safe_task_name = "".join(c for c in task_name if c.isalnum() or c in ("-", "_")).rstrip()
+            filename = f"bledy_{safe_task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            
+            attachment.add_header("Content-Disposition", "attachment", filename=filename)
+            msg.attach(attachment)
+
+        # Wysyłka SMTP
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, recipients, msg.as_string())
+            
+        log_to_app(f"Email notification for the task '{task_name}' was successfully sent with an attachment.")
+    except Exception as e:
+        log_to_app(f"Error sending email notification: {str(e)}")
 
 def save_config(data):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -352,13 +443,45 @@ def execute_backup_process(task_id: int):
             
         log_to_app(f"Task {task['name']} completed with status: {final_status}.")
         
-        send_notification(
-            task["name"], 
-            final_status, 
-            discord_url=task.get("discord_webhook"), 
-            ntfy_url=task.get("ntfy_url"),
-            skipped_files=skipped_onedrive_files if len(skipped_onedrive_files) > 0 else None
-        )
+        # ==================== POPRAWIONA SEKCJA POWIADOMIEŃ ====================
+        # Wysyłamy Discorda gdy jest Błąd LUB gdy jest OK, ale rclone pominął za długie ścieżki
+        #if final_status == "Błąd" or (final_status == "OK" and len(skipped_onedrive_files) > 0):
+        try:
+            send_notification(
+                task["name"], 
+                final_status, 
+                discord_url=task.get("discord_webhook"), 
+                ntfy_url=task.get("ntfy_url"),
+                skipped_files=skipped_onedrive_files if len(skipped_onedrive_files) > 0 else None
+            )
+        except Exception as notify_err:
+            log_to_app(f"Error sending notification (Discord/Ntfy): {str(notify_err)}")
+        # =======================================================================
+
+        # 2. Powiadomienia E-mail (Z wyciąganiem linii ERROR z logu konkretnego zadania)
+        if task.get("email_enabled", False) and task.get("email_recipients"):
+            email_level = task.get("email_level", "tylko_bledy")
+            should_send_email = False
+
+            if email_level == "wszystkie":
+                should_send_email = True
+            elif email_level == "bledy_i_onedrive":
+                if final_status == "Błąd" or len(skipped_onedrive_files) > 0:
+                    should_send_email = True
+            elif email_level == "tylko_bledy":
+                if final_status == "Błąd":
+                    should_send_email = True
+
+            if should_send_email:
+                # Przekazujemy 'log_file_path', który został utworzony na początku tej funkcji
+                send_email_notification(
+                    task["name"],
+                    final_status,
+                    task["email_recipients"],
+                    skipped_files=skipped_onedrive_files if len(skipped_onedrive_files) > 0 else None,
+                    log_file_path=log_file_path  # <-- TUTAJ przekazujemy precyzyjny log zadania
+                )
+        # ============================================================
             
         if final_status in ["OK", "SUCCESS"]:
             clean_old_trash_folders(task)
