@@ -7,6 +7,7 @@ import jwt
 import time
 import logging
 import smtplib
+import shutil
 
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
@@ -257,6 +258,9 @@ def clean_old_trash_folders(task: dict):
         
         # --- BEZPIECZNIK: Ignoruj, jeśli ścieżka lokalna zawiera dwukropek (to na pewno chmura) ---
         if ":" in trash_base:
+            log_to_app(
+                f"Invalid local path in the task '{task['name']}': {trash_base}"
+            )
             return
             
         if not os.path.exists(trash_base):
@@ -267,10 +271,17 @@ def clean_old_trash_folders(task: dict):
             subdirs.sort()
             while len(subdirs) > retention_limit:
                 oldest_folder = subdirs.pop(0)
-                subprocess.run(["rm", "-rf", oldest_folder])
-                log_to_app(f"Local Retention: Removed oldest trash folder: {oldest_folder}")
+                #subprocess.run(["rm", "-rf", oldest_folder])
+                #log_to_app(f"Local Retention: Removed oldest trash folder: {oldest_folder}")
+        #except Exception as e:
+            #log_to_app(f"Local retention error: {str(e)}")
+                try:
+                    shutil.rmtree(oldest_folder)
+                    log_to_app(f"Local Retention: Removed oldest trash folder: {oldest_folder}")
+                except Exception as rm_err:
+                    log_to_app(f"Local retention error during deletion {oldest_folder}: {str(rm_err)}")
         except Exception as e:
-            log_to_app(f"Local retention error: {str(e)}")
+            log_to_app(f"Error reading local Trash directory: {str(e)}")
 
     elif task["type"] == "cloud":
         trash_base = task["destination"].rstrip("/") + "-trash"
@@ -284,10 +295,21 @@ def clean_old_trash_folders(task: dict):
             while len(subdirs) > retention_limit:
                 oldest_folder_name = subdirs.pop(0)
                 full_remote_trash_path = f"{trash_base}/{oldest_folder_name}"
-                subprocess.run(["rclone", f"--config={RCLONE_CONFIG_PATH}", "purge", full_remote_trash_path])
-                log_to_app(f"Cloud Retention: Removed oldest trash folder: {full_remote_trash_path}")
+                
+                cmd_purge = ["rclone", f"--config={RCLONE_CONFIG_PATH}", "purge", full_remote_trash_path]
+                result = subprocess.run(cmd_purge, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    log_to_app(f"Cloud Retention: Removed oldest trash folder: {full_remote_trash_path}")
+                else:
+                    clean_error = result.stderr.strip() if result.stderr else "Nieznany błąd"
+                    log_to_app(f"Cloud retention error for {full_remote_trash_path}: {clean_error}")
         except Exception as e:
-            log_to_app(f"Cloud retention error: {str(e)}")
+            log_to_app(f"Error clearing cloud trash (engine): {str(e)}")
+                #subprocess.run(["rclone", f"--config={RCLONE_CONFIG_PATH}", "purge", full_remote_trash_path])
+                #log_to_app(f"Retencja chmury: Usunięto najstarszy folder kosza: {full_remote_trash_path}")
+        #except Exception as e:
+            #log_to_app(f"Błąd czyszczenia kosza w chmurze: {str(e)}")
 
 def clean_all_trash_folders_cron():
     log_to_app("Scheduler: Running nightly trash cleanup for all tasks.")
