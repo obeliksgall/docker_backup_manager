@@ -20,7 +20,7 @@
         "properties": {
           "id": {"type": "integer"},
           "name": {"type": "string"},
-		  "next_task_id": {"type": ["integer", "null"]},
+          "next_task_id": {"type": ["integer", "null"]},
           "source": {"type": "string"},
           "destination": {"type": "string"},
           "type": {"type": "string", "enum": ["local", "cloud"]},
@@ -39,9 +39,26 @@
           "retention_days": {"type": "integer", "minimum": 0},
           "status": {"type": ["string", "null"]},
           "discord_webhook": {"type": ["string", "null"]},
-          "ntfy_url": {"type": ["string", "null"]}
+          "ntfy_url": {"type": ["string", "null"]},
+          "email_enabled": {"type": "boolean"},
+          "email_recipients": {"type": ["string", "null"]},
+          "email_level": {"type": "string", "enum": ["wszystkie", "bledy_i_onedrive", "tylko_bledy"]}
         },
-        "required": ["id", "name", "source", "destination", "type", "mode", "schedule", "enabled", "restore_enabled", "exclude", "retention_days"]
+        "required": [
+          "id", 
+          "name", 
+          "source", 
+          "destination", 
+          "type", 
+          "mode", 
+          "schedule", 
+          "enabled", 
+          "restore_enabled", 
+          "exclude", 
+          "retention_days",
+          "email_enabled",
+          "email_level"
+        ]
       }
     },
     "users": {
