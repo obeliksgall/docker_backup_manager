@@ -402,7 +402,7 @@ def execute_backup_process(task_id: int):
             log_file.write(f"Komenda: {' '.join(cmd)}\n\n")
             log_file.flush()
             
-            process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, text=True)
+            process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, text=True, cwd="/tmp") #dodanie , cwd="/tmp")
             active_backup_processes[task_id] = process  # Używamy bezpiecznego task_id
             process.wait()
             
@@ -571,7 +571,7 @@ def execute_restore_process(task_id: int):
             log_file.write(f"=== START RESTORE: {task['name']} ===\n")
             log_file.write(f"Komenda: {' '.join(cmd)}\n\n")
             log_file.flush()
-            process = subprocess.run(cmd, stdout=log_file, stderr=log_file, text=True)
+            process = subprocess.run(cmd, stdout=log_file, stderr=log_file, text=True, cwd="/tmp") #dodanie , cwd="/tmp")
             
         status = "SUKCES" if process.returncode == 0 else "BŁĄD"
         log_to_app(f"Przywracanie {task['name']} zakończone: {status}.")
