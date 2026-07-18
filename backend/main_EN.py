@@ -620,8 +620,8 @@ def create_task(task: TaskSchema):
     
     if task.type == "local" and not os.path.exists(task.source):
         raise HTTPException(status_code=400, detail=f"Directory path does not exist: {task.source}")
-    elif task.type == "cloud" and not os.path.exists(task.destination) and not task.destination.startswith("http"):
-        os.makedirs(task.destination, exist_ok=True)
+    #elif task.type == "cloud" and not os.path.exists(task.destination) and not task.destination.startswith("http"):
+    #    os.makedirs(task.destination, exist_ok=True)
         
     new_task = task.dict()
     new_task["id"] = new_id
@@ -643,8 +643,8 @@ def update_task(task_id: int, fields: TaskSchema):
     
     if fields.type == "local" and not os.path.exists(fields.source):
         raise HTTPException(status_code=400, detail="Source path does not exist")
-    elif fields.type == "cloud" and not os.path.exists(fields.destination):
-        os.makedirs(fields.destination, exist_ok=True)
+    #elif fields.type == "cloud" and not os.path.exists(fields.destination):
+    #    os.makedirs(fields.destination, exist_ok=True)
     
     updated_task = fields.dict()
     updated_task["id"] = task_id
