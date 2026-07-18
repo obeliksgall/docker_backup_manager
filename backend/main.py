@@ -13,7 +13,7 @@ from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, Depends
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Literal  # <-- DODANO Literal DO WALIDACJI
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -89,8 +89,8 @@ class TaskSchema(BaseModel):
     name: str
     source: str
     destination: str
-    type: str                  # "local" lub "cloud"
-    mode: str                  # "mirror", "incremental", "move"
+    type: Literal["local", "cloud"]              # <-- ŚCISŁA WALIDACJA TYPU #type: str                  # "local" lub "cloud"
+    mode: Literal["mirror", "copy", "move"]       # <-- ŚCISŁA WALIDACJA TRYBU #mode: str                  # "mirror", "incremental", "move"
     schedule: str              # Zapis Cron, np. "0 3 * * *"
     enabled: bool = True       # Czy aktywne w harmonogramie
     restore_enabled: bool = False # Bezpiecznik dla Restore
@@ -103,7 +103,7 @@ class TaskSchema(BaseModel):
     # --- NOWE POLA E-MAIL ---
     email_enabled: bool = False
     email_recipients: Optional[str] = ""
-    email_level: str = "wszystkie"  # "wszystkie", "bledy_i_onedrive", "tylko_bledy"
+    email_level: Literal["wszystkie", "bledy_i_onedrive", "tylko_bledy"] = "wszystkie" # <-- ZABEZPIECZONY LEVEL #email_level: str = "wszystkie"  # "wszystkie", "bledy_i_onedrive", "tylko_bledy"
 
 # --- FUNKCJE POMOCNICZE ---
 def log_to_app(message: str):
