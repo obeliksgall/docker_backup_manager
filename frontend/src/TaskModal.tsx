@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Save, Server, Cloud, FolderOpen } from 'lucide-react';
+import { X, Save, Server, Cloud, FolderOpen, Mail } from 'lucide-react';
 import FolderBrowserModal from './FolderBrowserModal';
 
 interface Task {
@@ -15,10 +15,14 @@ interface Task {
   restore_enabled: boolean;
   exclude: string[];
   custom_flags: string[];
-  next_task_id?: number | null; // <-- NOWE POLE
+  next_task_id?: number | null;
   retention_days: number;
   discord_webhook?: string;
   ntfy_url?: string;
+  // --- NOWE POLA E-MAIL ---
+  email_enabled: boolean;
+  email_recipients?: string;
+  email_level: string;
 }
 
 interface TaskModalProps {
@@ -31,13 +35,13 @@ interface TaskModalProps {
 export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalProps) {
   const { t } = useTranslation();
   
-  // Przechowujemy listę wszystkich zadań pobraną z pliku config w celu wyświetlenia w select
   const [allTasks, setAllTasks] = useState<Task[]>([]);
 
   const [formData, setFormData] = useState<Task>({
     name: '', source: '', destination: '', type: 'local', mode: 'mirror',
     schedule: '0 3 * * *', enabled: true, restore_enabled: false, exclude: [],
-    custom_flags: [], next_task_id: null, retention_days: 0, discord_webhook: '', ntfy_url: ''
+    custom_flags: [], next_task_id: null, retention_days: 0, discord_webhook: '', ntfy_url: '',
+    email_enabled: false, email_recipients: '', email_level: 'tylko_bledy'
   });
 
   const [excludeInput, setExcludeInput] = useState('');
@@ -48,7 +52,6 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
   const [browserTarget, setBrowserTarget] = useState<'source' | 'destination'>('source');
   const [browserTitle, setBrowserTitle] = useState('');
 
-  // Pobieranie listy zadań z API do selecta przy otwarciu modala
   useEffect(() => {
     if (isOpen) {
       const fetchRawTasks = async () => {
@@ -73,7 +76,10 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
         discord_webhook: task.discord_webhook || '',
         ntfy_url: task.ntfy_url || '',
         custom_flags: task.custom_flags || [],
-        next_task_id: task.next_task_id !== undefined ? task.next_task_id : null
+        next_task_id: task.next_task_id !== undefined ? task.next_task_id : null,
+        email_enabled: task.email_enabled || false,
+        email_recipients: task.email_recipients || '',
+        email_level: task.email_level || 'tylko_bledy'
       });
       setExcludeInput(task.exclude ? task.exclude.join(', ') : '');
       setCustomFlagsInput(task.custom_flags ? task.custom_flags.join(', ') : '');
@@ -81,7 +87,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
       setFormData({
         name: '', source: '', destination: '', type: 'local', mode: 'mirror',
         schedule: '0 3 * * *', enabled: true, restore_enabled: false, exclude: [],
-        custom_flags: [], next_task_id: null, retention_days: 0, discord_webhook: '', ntfy_url: ''
+        custom_flags: [], next_task_id: null, retention_days: 0, discord_webhook: '', ntfy_url: '',
+        email_enabled: false, email_recipients: '', email_level: 'tylko_bledy'
       });
       setExcludeInput('');
       setCustomFlagsInput('');
@@ -119,8 +126,6 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
     setIsSubmitting(true);
     
     const excludeArray = excludeInput.split(',').map(item => item.trim()).filter(item => item !== '');
-    //const flagsArray = customFlagsInput.split(',').map(item => item.trim()).filter(item => item !== '');
-	// Dzieli tekst tylko po przecinku ze spacją (np. ", ")
     const flagsArray = customFlagsInput.split(/, +/).map(item => item.trim()).filter(item => item !== '');
 
     try {
@@ -254,7 +259,6 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
             </div>
           </div>
 
-          {/* DYNAMICZNY SELEKTOR NASTĘPNEGO ZADANIA (ŁAŃCUCH) */}
           <div>
             <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_next_task')}</label>
             <select
@@ -265,7 +269,6 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
             >
               <option value="">{t('option_none')}</option>
               {allTasks
-                // Odfiltrowujemy aktualnie edytowane zadanie, aby zapobiec zapętleniu (self-reference)
                 .filter(t => t.id !== formData.id)
                 .map(t => (
                   <option key={t.id} value={t.id}>
@@ -313,7 +316,56 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
             </div>
           </div>
 
-          <div className="flex gap-6 pt-2">
+          {/* ==================== NOWA SEKCJA KONFIGURACJI E-MAIL ==================== */}
+          <div className="pt-4 border-t border-slate-800/60 space-y-4">
+            <div className="flex items-center gap-2">
+              <Mail className="w-4 h-4 text-indigo-400" />
+              <h3 className="font-bold text-white text-xs uppercase tracking-wider">{t('sec_email_settings')}</h3>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div className="md:col-span-2">
+                <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_email_recipients')}</label>
+                <input
+                  type="text" 
+                  name="email_recipients" 
+                  value={formData.email_recipients} 
+                  onChange={handleChange}
+                  disabled={!formData.email_enabled}
+                  placeholder="np. mail1@gmail.com, mail2@poczta.pl"
+                  className="w-full bg-slate-950 border border-slate-800 disabled:opacity-40 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_email_level')}</label>
+                <select
+                  name="email_level" 
+                  value={formData.email_level} 
+                  onChange={handleChange}
+                  disabled={!formData.email_enabled}
+                  className="w-full bg-slate-950 border border-slate-800 disabled:opacity-40 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition"
+                >
+                  <option value="wszystkie">{t('email_lvl_all')}</option>
+                  <option value="bledy_i_onedrive">{t('email_lvl_warnings')}</option>
+                  <option value="tylko_bledy">{t('email_lvl_errors')}</option>
+                </select>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer select-none pt-1">
+              <input 
+                type="checkbox" 
+                name="email_enabled" 
+                checked={formData.email_enabled} 
+                onChange={handleChange} 
+                className="w-4 h-4 bg-slate-950 border border-slate-800 rounded text-indigo-600 focus:ring-0" 
+              />
+              <span className="font-medium text-slate-300">{t('lbl_email_active')}</span>
+            </label>
+          </div>
+          {/* ========================================================================= */}
+
+          <div className="flex gap-6 pt-2 border-t border-slate-800/60">
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <input type="checkbox" name="enabled" checked={formData.enabled} onChange={handleChange} className="w-4 h-4 bg-slate-950 border border-slate-800 rounded text-indigo-600 focus:ring-0" />
               <span className="font-medium text-slate-300">{t('lbl_cron_active')}</span>

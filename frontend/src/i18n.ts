@@ -97,6 +97,13 @@ const resources = {
       "option_none": "--- Brak (koniec łańcucha) ---",
 	  "cloned_suffix": "Kopia",
 	  "tooltip_clone": "Klonuj zadanie", // <-- DODAJ TĘ LINIĘ
+	  "sec_email_settings": "Powiadomienia E-mail (Gmail)",
+	  "lbl_email_active": "Włącz powiadomienia e-mail dla tego zadania",
+	  "lbl_email_recipients": "Adresy odbiorców (rozdzielane przecinkami)",
+	  "lbl_email_level": "Warunek wysyłki",
+	  "email_lvl_all": "Wszystkie (Zawsze wysyłaj)",
+	  "email_lvl_warnings": "Błędy oraz ostrzeżenia ścieżek",
+	  "email_lvl_errors": "Tylko krytyczne błędy"
     }
   },
   en: {
@@ -194,6 +201,13 @@ const resources = {
       "option_none": "--- None (end of chain) ---",
 	  "cloned_suffix": "Copy",
 	  "tooltip_clone": "Clone task", // <-- DODAJ TĘ LINIĘ
+	  "sec_email_settings": "E-mail notifications (Gmail)",
+	  "lbl_email_active": "Enable email notifications for this task.",
+	  "lbl_email_recipients": "Recipient addresses (comma-separated)",
+	  "lbl_email_level": "Shipping condition",
+	  "email_lvl_all": "All (Always send)",
+	  "email_lvl_warnings": "Path errors and warnings",
+	  "email_lvl_errors": "Critical errors only"
     }
   }
 };
