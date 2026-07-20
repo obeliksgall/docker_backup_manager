@@ -99,6 +99,7 @@ class TaskSchema(BaseModel):
     email_enabled: bool = False
     email_recipients: Optional[str] = ""
     email_level: Literal["wszystkie", "bledy_i_onedrive", "tylko_bledy"] = "wszystkie" # <-- ZABEZPIECZONY LEVEL #email_level: str = "wszystkie"  # "wszystkie", "bledy_i_onedrive", "tylko_bledy"
+    last_run: Optional[str] = None
 
 # --- HELPER FUNCTIONS ---
 def log_to_app(message: str):
@@ -346,6 +347,7 @@ def execute_backup_process(task_id: int):
     for t in config.get("tasks", []):
         if t["id"] == task_id:
             t["status"] = "RUNNING"
+            t["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S") # <-- NOWA LINIA
             break
     save_config(config)
     
