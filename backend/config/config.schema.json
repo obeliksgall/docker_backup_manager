@@ -42,7 +42,8 @@
           "ntfy_url": {"type": ["string", "null"]},
           "email_enabled": {"type": "boolean"},
           "email_recipients": {"type": ["string", "null"]},
-          "email_level": {"type": "string", "enum": ["wszystkie", "bledy_i_onedrive", "tylko_bledy"]}
+          "email_level": {"type": "string", "enum": ["wszystkie", "bledy_i_onedrive", "tylko_bledy"]},
+		  "last_run": {"type": ["string", "null"]}
         },
         "required": [
           "id", 
