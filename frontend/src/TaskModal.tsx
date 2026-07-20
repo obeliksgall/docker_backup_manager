@@ -23,6 +23,7 @@ interface Task {
   email_enabled: boolean;
   email_recipients?: string;
   email_level: string;
+  last_run?: string | null; // <-- NOWE POLE
 }
 
 interface TaskModalProps {
@@ -41,7 +42,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
     name: '', source: '', destination: '', type: 'local', mode: 'mirror',
     schedule: '0 3 * * *', enabled: true, restore_enabled: false, exclude: [],
     custom_flags: [], next_task_id: null, retention_days: 0, discord_webhook: '', ntfy_url: '',
-    email_enabled: false, email_recipients: '', email_level: 'tylko_bledy'
+    email_enabled: false, email_recipients: '', email_level: 'tylko_bledy',
+	last_run: null // <-- STAN POCZĄTKOWY
   });
 
   const [excludeInput, setExcludeInput] = useState('');
@@ -79,7 +81,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
         next_task_id: task.next_task_id !== undefined ? task.next_task_id : null,
         email_enabled: task.email_enabled || false,
         email_recipients: task.email_recipients || '',
-        email_level: task.email_level || 'tylko_bledy'
+        email_level: task.email_level || 'tylko_bledy',
+		last_run: task.last_run || null // <-- ZACHOWANIE DATY PRZY EDYCJI
       });
       setExcludeInput(task.exclude ? task.exclude.join(', ') : '');
       setCustomFlagsInput(task.custom_flags ? task.custom_flags.join(', ') : '');
@@ -88,7 +91,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
         name: '', source: '', destination: '', type: 'local', mode: 'mirror',
         schedule: '0 3 * * *', enabled: true, restore_enabled: false, exclude: [],
         custom_flags: [], next_task_id: null, retention_days: 0, discord_webhook: '', ntfy_url: '',
-        email_enabled: false, email_recipients: '', email_level: 'tylko_bledy'
+        email_enabled: false, email_recipients: '', email_level: 'tylko_bledy',
+		last_run: null // <-- RESET DLA NOWEGO ZADANIA
       });
       setExcludeInput('');
       setCustomFlagsInput('');

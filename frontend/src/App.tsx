@@ -28,6 +28,7 @@ interface Task {
   status?: string;
   discord_webhook?: string;
   ntfy_url?: string;
+  last_run?: string | null; // <-- KROK 1: DODANIE DO INTERFEJSU
 }
 
 export default function App() {
@@ -402,6 +403,14 @@ export default function App() {
                     <p className="truncate"><span className="text-slate-500 font-medium">{t('lbl_destination') || 'Cel'}:</span> {task.destination}</p>
                     <p><span className="text-slate-500 font-medium">{t('lbl_mode') || 'Tryb'}:</span> <span className="text-slate-300 font-medium">{task.mode}</span></p>
                     <p><span className="text-slate-500 font-medium">Cron:</span> <code className="bg-slate-950 px-1.5 py-0.5 rounded font-mono text-[11px] text-indigo-400 border border-slate-800/40">{task.schedule}</code></p>
+                    
+                    {/* KROK 2: DYNAMICZNE WYŚWIETLANIE DATY OSTATNIEGO URUCHOMIENIA */}
+                    <p>
+                      <span className="text-slate-500 font-medium">{t('lbl_last_run') || 'Ostatnie uruchomienie'}:</span>{' '}
+                      <span className={task.last_run ? 'text-slate-300 font-medium' : 'text-slate-600 italic'}>
+                        {task.last_run ? task.last_run : (t('status_never') || 'Nieuruchamiane')}
+                      </span>
+                    </p>
                   </div>
                 </div>
 

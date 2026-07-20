@@ -103,7 +103,8 @@ const resources = {
 	  "lbl_email_level": "Warunek wysyłki",
 	  "email_lvl_all": "Wszystkie (Zawsze wysyłaj)",
 	  "email_lvl_warnings": "Błędy oraz ostrzeżenia ścieżek",
-	  "email_lvl_errors": "Tylko krytyczne błędy"
+	  "email_lvl_errors": "Tylko krytyczne błędy",
+	  "lbl_last_run": "Ostatnie uruchomienie"
     }
   },
   en: {
@@ -207,7 +208,8 @@ const resources = {
 	  "lbl_email_level": "Shipping condition",
 	  "email_lvl_all": "All (Always send)",
 	  "email_lvl_warnings": "Path errors and warnings",
-	  "email_lvl_errors": "Critical errors only"
+	  "email_lvl_errors": "Critical errors only",
+	  "lbl_last_run": "Last run"
     }
   }
 };
