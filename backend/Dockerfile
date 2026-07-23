@@ -1,5 +1,12 @@
 FROM python:3.11-slim
 
+# Wyłączenie interaktywnych monitów debconf oraz wyciszenie spamu z pip
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+ENV NPM_CONFIG_LOGLEVEL=warn
+
 # Instalujemy rsync oraz rclone w systemie kontenera
 #RUN apt-get update && apt-get install -y rsync rclone && rm -rf /var/lib/apt/lists/*
 RUN apt-get update && apt-get install -y rsync curl unzip && \
