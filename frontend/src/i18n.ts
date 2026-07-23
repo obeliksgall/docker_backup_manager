@@ -104,7 +104,18 @@ const resources = {
 	  "email_lvl_all": "Wszystkie (Zawsze wysyłaj)",
 	  "email_lvl_warnings": "Błędy oraz ostrzeżenia ścieżek",
 	  "email_lvl_errors": "Tylko krytyczne błędy",
-	  "lbl_last_run": "Ostatnie uruchomienie"
+	  "lbl_last_run": "Ostatnie uruchomienie",
+	  "modal_config_title": "Zarządzanie Konfiguracją",
+	  "tab_export": "Eksport (Kopia)",
+	  "tab_import": "Import (Przywróć)",
+	  "lbl_export_password": "Hasło do zaszyfrowania pliku",
+	  "lbl_import_password": "Hasło do odszyfrowania pliku",
+	  "lbl_select_enc_file": "Plik konfiguracji (.enc)",
+	  "btn_download_export": "Pobierz zaszyfrowany plik",
+	  "btn_upload_import": "Odszyfruj i Przywróć",
+	  "btn_config_settings": "Kopia ustawień",
+	  "msg_export_success": "Pomyślnie pobrano zaszyfrowany plik konfiguracji.",
+	  "msg_import_success": "Konfiguracja została pomyślnie odszyfrowana i wczytana!"
     }
   },
   en: {
@@ -209,7 +220,18 @@ const resources = {
 	  "email_lvl_all": "All (Always send)",
 	  "email_lvl_warnings": "Path errors and warnings",
 	  "email_lvl_errors": "Critical errors only",
-	  "lbl_last_run": "Last run"
+	  "lbl_last_run": "Last run",
+	  "modal_config_title": "Configuration management",
+	  "tab_export": "Export (Copy)",
+	  "tab_import": "Import (Restore)",
+	  "lbl_export_password": "Password to encrypt the file",
+	  "lbl_import_password": "Password to decrypt the file",
+	  "lbl_select_enc_file": "Configuration file (.enc)",
+	  "btn_download_export": "Download the encrypted file",
+	  "btn_upload_import": "Decrypt and Restore",
+	  "btn_config_settings": "Copy of settings",
+	  "msg_export_success": "The encrypted configuration file was successfully downloaded.",
+	  "msg_import_success": "The configuration has been successfully decrypted and loaded!"
     }
   }
 };

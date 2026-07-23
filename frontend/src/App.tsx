@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next';
 import { 
   Shield, RefreshCw, Server, Cloud, Play, CheckCircle, XCircle, 
   Edit2, Trash2, Loader2, Plus, FileText, LogOut, Globe, Database,
-  Copy
+  Copy, Settings
 } from 'lucide-react';
 import TaskModal from './TaskModal';
 import LogModal from './LogModal';
 import Login from './Login';
+import ConfigModal from './ConfigModal';
 
 const API_URL = `http://${window.location.hostname}:8000`;
 
@@ -28,7 +29,7 @@ interface Task {
   status?: string;
   discord_webhook?: string;
   ntfy_url?: string;
-  last_run?: string | null; // <-- KROK 1: DODANIE DO INTERFEJSU
+  last_run?: string | null;
 }
 
 export default function App() {
@@ -50,6 +51,8 @@ export default function App() {
   const [activeLogTask, setActiveLogTask] = useState<Task | null>(null);
   const [logsText, setLogsText] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
+
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
@@ -296,6 +299,16 @@ export default function App() {
         <div className="flex items-center justify-between border-b border-slate-900 pb-4">
           <h2 className="text-xl font-bold text-white tracking-tight">{t('dashboard_title') || 'Zadania automatyczne'}</h2>
           <div className="flex gap-2">
+            {/* PRZYCISK ZARZĄDZANIA KONFIGURACJĄ */}
+            <button 
+              onClick={() => setIsConfigModalOpen(true)}
+              className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-800 transition text-slate-300 hover:text-white"
+              title={t('tooltip_config_modal') || 'Kopia/Przywracanie ustawień'}
+            >
+              <Settings className="w-4 h-4 text-indigo-400" />
+              <span className="hidden sm:inline">{t('btn_config_settings') || 'Ustawienia'}</span>
+            </button>
+            
             <button 
               onClick={fetchTasks}
               className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-800 transition"
@@ -404,7 +417,7 @@ export default function App() {
                     <p><span className="text-slate-500 font-medium">{t('lbl_mode') || 'Tryb'}:</span> <span className="text-slate-300 font-medium">{task.mode}</span></p>
                     <p><span className="text-slate-500 font-medium">Cron:</span> <code className="bg-slate-950 px-1.5 py-0.5 rounded font-mono text-[11px] text-indigo-400 border border-slate-800/40">{task.schedule}</code></p>
                     
-                    {/* KROK 2: DYNAMICZNE WYŚWIETLANIE DATY OSTATNIEGO URUCHOMIENIA */}
+                    {/* DYNAMICZNE WYŚWIETLANIE DATY OSTATNIEGO URUCHOMIENIA */}
                     <p>
                       <span className="text-slate-500 font-medium">{t('lbl_last_run') || 'Ostatnie uruchomienie'}:</span>{' '}
                       <span className={task.last_run ? 'text-slate-300 font-medium' : 'text-slate-600 italic'}>
@@ -472,6 +485,13 @@ export default function App() {
 
       <TaskModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveTask} task={selectedTask} />
       <LogModal isOpen={isLogModalOpen} onClose={() => setIsLogModalOpen(false)} taskName={activeLogTask ? activeLogTask.name : ''} logs={logsText} loading={logsLoading} onRefresh={() => activeLogTask && fetchLogs(activeLogTask)} />
+      <ConfigModal 
+        isOpen={isConfigModalOpen} 
+        onClose={() => setIsConfigModalOpen(false)} 
+        onImportSuccess={fetchTasks} 
+        apiUrl={API_URL} 
+        getHeaders={getHeaders} 
+      />
     </div>
   );
 }
