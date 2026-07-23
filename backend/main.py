@@ -8,16 +8,17 @@ import time
 import logging
 import smtplib
 import shutil
+import base64
 
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, Depends, UploadFile, File, Form
+from fastapi.responses import Response
 from pydantic import BaseModel
-from typing import Optional, List, Literal  # <-- DODANO Literal DO WALIDACJI
+from typing import Optional, List, Literal  # ŚCISŁA WALIDACJA TYPÓW
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-# IMPORT WYKONAWCY WĄTKÓW DLA KOLEJKOWANIA
 from apscheduler.executors.pool import ThreadPoolExecutor
 
 from fastapi.security.api_key import APIKeyHeader
@@ -25,11 +26,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication  # Potrzebne do załącznika
+from email.mime.application import MIMEApplication
+
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 app = FastAPI(title="Docker Backup Manager API")
 
-# Pobieramy nowe zmiennes z .env
+# Pobieramy zmienne środowiskowe z .env
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 DISABLE_REGISTRATION = os.getenv("DISABLE_REGISTRATION", "false").lower() == "true"
@@ -39,7 +44,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 
-print(f"DEBUG AUTH -> USER: {ADMIN_USERNAME}, PASS: {ADMIN_PASSWORD}, REG_DISABLED: {DISABLE_REGISTRATION}")
+#print(f"DEBUG AUTH -> USER: {ADMIN_USERNAME}, PASS: {ADMIN_PASSWORD}, REG_DISABLED: {DISABLE_REGISTRATION}")
 
 class LoginSchema(BaseModel):
     username: str
@@ -75,7 +80,7 @@ def verify_api_key(api_key: str = Depends(api_key_header)):
         )
     return api_key
 
-# --- POPRAWKA: KONFIGURACJA KOLEJKOWANIA ZADAŃ NA NAS ---
+# --- KONFIGURACJA KOLEJKOWANIA ZADAŃ NA NAS ---
 executors = {
     'default': ThreadPoolExecutor(max_workers=1)
 }
@@ -89,8 +94,8 @@ class TaskSchema(BaseModel):
     name: str
     source: str
     destination: str
-    type: Literal["local", "cloud"]              # <-- ŚCISŁA WALIDACJA TYPU #type: str                  # "local" lub "cloud"
-    mode: Literal["mirror", "copy", "move"]       # <-- ŚCISŁA WALIDACJA TRYBU #mode: str                  # "mirror", "incremental", "move"
+    type: Literal["local", "cloud"]              # ŚCISŁA WALIDACJA TYPU
+    mode: Literal["mirror", "copy", "move"]       # ŚCISŁA WALIDACJA TRYBU
     schedule: str              # Zapis Cron, np. "0 3 * * *"
     enabled: bool = True       # Czy aktywne w harmonogramie
     restore_enabled: bool = False # Bezpiecznik dla Restore
@@ -98,12 +103,11 @@ class TaskSchema(BaseModel):
     retention_days: int = 0    # Liczba trzymanych wersji kosza (0 = brak)
     discord_webhook: Optional[str] = None
     ntfy_url: Optional[str] = None
-    custom_flags: Optional[List[str]] = []  # <-- NOWE POLE NA FLAGI PER ZADANIE
-    next_task_id: Optional[int] = None  # <-- NOWE POLE: ID następnego zadania (np. 3)
-    # --- NOWE POLA E-MAIL ---
+    custom_flags: Optional[List[str]] = []  # Flagi per zadanie
+    next_task_id: Optional[int] = None  # ID następnego zadania (łańcuch)
     email_enabled: bool = False
     email_recipients: Optional[str] = ""
-    email_level: Literal["wszystkie", "bledy_i_onedrive", "tylko_bledy"] = "wszystkie" # <-- ZABEZPIECZONY LEVEL #email_level: str = "wszystkie"  # "wszystkie", "bledy_i_onedrive", "tylko_bledy"
+    email_level: Literal["wszystkie", "bledy_i_onedrive", "tylko_bledy"] = "wszystkie"
     last_run: Optional[str] = None
 
 # --- FUNKCJE POMOCNICZE ---
@@ -122,14 +126,11 @@ def log_to_app(message: str):
 
 def send_notification(task_name: str, status: str, discord_url: str = None, ntfy_url: str = None, skipped_files: list = None):
     emoji = "✅" if status in ["OK", "SUKCES"] else "❌"
-    
-    # Podstawowa wiadomość
     msg = f"{emoji} Zadanie '{task_name}' zakończyło się statusem: {status}."
     
-    # Jeśli mamy pominięte pliki, doklejamy je do wiadomości na Discorda
     if skipped_files:
         msg += "\n\n⚠️ **Wykryto zbyt długie ścieżki (Pominięte przez OneDrive - limit 400 znaków):**"
-        for file_path in skipped_files[:10]:  # Pokazujemy max 10 pierwszych, żeby nie zatkać Discorda
+        for file_path in skipped_files[:10]:
             msg += f"\n• `{file_path}`"
         if len(skipped_files) > 10:
             msg += f"\n... i {len(skipped_files) - 10} więcej. Sprawdź pełny log zadania."
@@ -148,7 +149,6 @@ def send_notification(task_name: str, status: str, discord_url: str = None, ntfy
             with urllib.request.urlopen(req) as res: pass
         except Exception as e: log_to_app(f"Błąd powiadomienia Discord: {str(e)}")
 
-    # ntfy (prostszas wersja, bez markdowna)
     if ntfy_url and ntfy_url not in ["string", "null", "None", ""]:
         try:
             ntfy_msg = msg.replace("**", "").replace("`", "")
@@ -181,7 +181,6 @@ def send_email_notification(task_name: str, status: str, recipients_str: str, sk
         msg["To"] = ", ".join(recipients)
         msg["Subject"] = f"{emoji} Backup: {task_name} - Status: {status}"
 
-        # --- Podstawowa treść maila ---
         body = f"Zadanie kopii zapasowej '{task_name}' zakończyło się ze statusem: {status}.\n"
         body += f"Czas raportu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
@@ -191,7 +190,6 @@ def send_email_notification(task_name: str, status: str, recipients_str: str, sk
                 body += f"- {file_path}\n"
             body += "\n"
 
-        # --- SEKCJA PRZYGOTOWANIA ZAŁĄCZNIKA Z LOGAMI ERROR ---
         error_content = ""
         if log_file_path and os.path.exists(log_file_path):
             error_lines = []
@@ -199,18 +197,15 @@ def send_email_notification(task_name: str, status: str, recipients_str: str, sk
                 with open(log_file_path, "r", encoding="utf-8") as f:
                     for line in f:
                         if "ERROR" in line:
-                            # --- BEZPIECZNIK: Ignoruj standardowe ostrzeżenia rclone o IO errors ---
                             if "not deleting files as there were IO errors" in line:
                                 continue
                             if "not deleting directories as there were IO errors" in line:
                                 continue
-                            
                             error_lines.append(line.strip())
             except Exception as log_err:
                 body += f"[Błąd podczas odczytu pliku logów do załącznika: {str(log_err)}]\n"
 
             if error_lines:
-                # Tworzymy treść pliku tekstowego ze wszystkimi błędami
                 error_content = f"RAPORT BŁĘDÓW DLA ZADANIA: {task_name}\n"
                 error_content += f"Status końcowy: {status}\n"
                 error_content += f"Wygenerowano: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -222,20 +217,15 @@ def send_email_notification(task_name: str, status: str, recipients_str: str, sk
             else:
                 body += "ℹ️ W pliku logów nie znaleziono żadnych wpisów zawierających 'ERROR'.\n"
 
-        # Dołączamy główną treść wiadomości
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
-        # Jeśli znaleziono błędy, generujemy i dołączamy plik .txt
         if error_content:
             attachment = MIMEApplication(error_content.encode("utf-8"), _subtype="txt")
-            # Bezpieczna nazwa pliku bez spacji i dziwnych znaków
             safe_task_name = "".join(c for c in task_name if c.isalnum() or c in ("-", "_")).rstrip()
             filename = f"bledy_{safe_task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            
             attachment.add_header("Content-Disposition", "attachment", filename=filename)
             msg.attach(attachment)
 
-        # Wysyłka SMTP
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASS)
@@ -266,11 +256,8 @@ def clean_old_trash_folders(task: dict):
     if task["type"] == "local":
         trash_base = task["destination"].rstrip("/") + "-trash"
         
-        # --- BEZPIECZNIK: Ignoruj, jeśli ścieżka lokalna zawiera dwukropek (to na pewno chmura) ---
         if ":" in trash_base:
-            log_to_app(
-                f"Błędna ścieżka lokalna w zadaniu '{task['name']}': {trash_base}"
-            )
+            log_to_app(f"Błędna ścieżka lokalna w zadaniu '{task['name']}': {trash_base}")
             return
             
         if not os.path.exists(trash_base):
@@ -281,10 +268,6 @@ def clean_old_trash_folders(task: dict):
             subdirs.sort()
             while len(subdirs) > retention_limit:
                 oldest_folder = subdirs.pop(0)
-                #subprocess.run(["rm", "-rf", oldest_folder])
-                #log_to_app(f"Retencja lokalna: Usunięto najstarszy folder kosza: {oldest_folder}")
-        #except Exception as e:
-            #log_to_app(f"Błąd czyszczenia kosza lokalnego: {str(e)}")
                 try:
                     shutil.rmtree(oldest_folder)
                     log_to_app(f"Retencja lokalna: Usunięto najstarszy folder kosza: {oldest_folder}")
@@ -316,10 +299,6 @@ def clean_old_trash_folders(task: dict):
                     log_to_app(f"Błąd retencji chmury dla {full_remote_trash_path}: {clean_error}")
         except Exception as e:
             log_to_app(f"Błąd czyszczenia kosza w chmurze (silnik): {str(e)}")
-                #subprocess.run(["rclone", f"--config={RCLONE_CONFIG_PATH}", "purge", full_remote_trash_path])
-                #log_to_app(f"Retencja chmury: Usunięto najstarszy folder kosza: {full_remote_trash_path}")
-        #except Exception as e:
-            #log_to_app(f"Błąd czyszczenia kosza w chmurze: {str(e)}")
 
 def clean_all_trash_folders_cron():
     log_to_app("Harmonogram: Uruchomiono nocne czyszczenie kosza dla wszystkich zadań.")
@@ -328,7 +307,6 @@ def clean_all_trash_folders_cron():
         if task.get("enabled", True) and task.get("retention_days", 0) > 0:
             clean_old_trash_folders(task)
             
-    # --- NOWA SEKCJA: CZYSZCZENIE LOGÓW STARSZYCH NIŻ 365 DNI ---
     log_to_app("Harmonogram: Uruchomiono czyszczenie logów starszych niż 365 dni.")
     now = time.time()
     cutoff = now - (365 * 24 * 60 * 60)
@@ -347,7 +325,6 @@ def clean_all_trash_folders_cron():
 
 # --- SILNIK BACKUPU ---
 def execute_backup_process(task_id: int):
-    # 1. Pobieramy najświeższy config z bazy na samym starcie wątku
     config = get_all_tasks()
     task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
     
@@ -355,11 +332,11 @@ def execute_backup_process(task_id: int):
         log_to_app(f"Błąd uruchomienia: Zadanie o ID {task_id} nie istnieje w bazie config.json.")
         return
 
-    # 2. Ustawiamy status RUNNING
+    # Ustawiamy status RUNNING i datę uruchomienia
     for t in config.get("tasks", []):
         if t["id"] == task_id:
             t["status"] = "RUNNING"
-            t["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S") # <-- NOWA LINIA
+            t["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             break
     save_config(config)
     
@@ -427,13 +404,11 @@ def execute_backup_process(task_id: int):
             log_file.flush()
             
             process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, text=True)
-            #process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, text=True, cwd="/tmp") #dodanie , cwd="/tmp")
-            active_backup_processes[task_id] = process  # Używamy bezpiecznego task_id
+            active_backup_processes[task_id] = process
             process.wait()
             
-        active_backup_processes.pop(task_id, None)  # Używamy bezpiecznego task_id
+        active_backup_processes.pop(task_id, None)
             
-        # Sprawdzamy czy zadanie nie zostało zatrzymane przez użytkownika
         current_config = get_all_tasks()
         task_in_db = next((t for t in current_config.get("tasks", []) if t["id"] == task_id), None)
             
@@ -472,7 +447,6 @@ def execute_backup_process(task_id: int):
             except Exception as parse_error:
                 log_to_app(f"Błąd podczas parsowania logu OneDrive: {str(parse_error)}")
 
-        # Zapisujemy finalny status
         config = get_all_tasks()
         for t in config.get("tasks", []):
             if t["id"] == task_id:
@@ -482,8 +456,6 @@ def execute_backup_process(task_id: int):
             
         log_to_app(f"Zadanie {task['name']} zakończone status: {final_status}.")
         
-        # ==================== POPRAWIONA SEKCJA POWIADOMIEŃ ====================
-        # Wysyłamy Discorda gdy jest Błąd LUB gdy jest OK, ale rclone pominął za długie ścieżki
         try:
             send_notification(
                 task["name"], 
@@ -494,9 +466,7 @@ def execute_backup_process(task_id: int):
             )
         except Exception as notify_err:
             log_to_app(f"Błąd wysyłania powiadomienia (Discord/Ntfy): {str(notify_err)}")
-        # =======================================================================
 
-        # 2. Powiadomienia E-mail (Z wyciąganiem linii ERROR z logu konkretnego zadania)
         if task.get("email_enabled", False) and task.get("email_recipients"):
             email_level = task.get("email_level", "tylko_bledy")
             should_send_email = False
@@ -511,20 +481,17 @@ def execute_backup_process(task_id: int):
                     should_send_email = True
 
             if should_send_email:
-                # Przekazujemy 'log_file_path', który został utworzony na początku tej funkcji
                 send_email_notification(
                     task["name"],
                     final_status,
                     task["email_recipients"],
                     skipped_files=skipped_onedrive_files if len(skipped_onedrive_files) > 0 else None,
-                    log_file_path=log_file_path  # <-- TUTAJ przekazujemy precyzyjny log zadania
+                    log_file_path=log_file_path
                 )
-        # ============================================================
             
         if final_status in ["OK", "SUCCESS"]:
             clean_old_trash_folders(task)
             
-            # Autouruchamianie zadania zależnego (łańcuch)
             next_id = task.get("next_task_id")
             if next_id:
                 all_tasks_config = get_all_tasks()
@@ -554,7 +521,6 @@ def execute_backup_process(task_id: int):
 
 # --- SILNIK RESTORE ---
 def execute_restore_process(task_id: int):
-    # Pobieramy najświeższą konfigurację zadania z pliku JSON
     config = get_all_tasks()
     task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
     
@@ -562,7 +528,6 @@ def execute_restore_process(task_id: int):
         log_to_app(f"Błąd przywracania: Zadanie o ID {task_id} nie istnieje w bazie config.json.")
         return
 
-    # Od tego miejsca kod pozostaje niemal bez zmian, korzystając ze zmiennej 'task'
     task_name_slug = task["name"].replace(" ", "_").lower()
     task_log_dir = os.path.join(LOGS_BASE_DIR, task_name_slug)
     os.makedirs(task_log_dir, exist_ok=True)
@@ -579,14 +544,12 @@ def execute_restore_process(task_id: int):
     elif task["type"] == "cloud":
         cmd = ["rclone", f"--config={RCLONE_CONFIG_PATH}", "copy", task["destination"], task["source"], "-v"]
         
-        # --- POPRAWKA: WSTRZYKIWANIE DYNAMICZNYCH FLAG DO PROCESU RESTORE ---
         global_config = get_all_tasks()
         settings = global_config.get("settings", {})
         rclone_flags = task.get("custom_flags")
         if rclone_flags is None:
             rclone_flags = settings.get("rclone_flags", ["--buffer-size=16M", "--transfers=2"])
             
-        # Wstrzykujemy flagi optymalizacyjne zaraz po słowie 'copy'
         cmd = cmd[:3] + rclone_flags + cmd[3:]
     else:
         return
@@ -597,7 +560,6 @@ def execute_restore_process(task_id: int):
             log_file.write(f"Komenda: {' '.join(cmd)}\n\n")
             log_file.flush()
             process = subprocess.run(cmd, stdout=log_file, stderr=log_file, text=True)
-            #process = subprocess.run(cmd, stdout=log_file, stderr=log_file, text=True, cwd="/tmp") #dodanie , cwd="/tmp")
             
         status = "SUKCES" if process.returncode == 0 else "BŁĄD"
         log_to_app(f"Przywracanie {task['name']} zakończone: {status}.")
@@ -633,7 +595,6 @@ def load_all_tasks_into_scheduler():
 
 @app.on_event("startup")
 def startup_event():
-    # --- NOWOŚĆ: CZYSZCZENIE STATUSÓW RUNNING PO RESTARCIE ---
     config = get_all_tasks()
     status_changed = False
     for task in config.get("tasks", []):
@@ -665,9 +626,6 @@ def create_task(task: TaskSchema):
     
     if task.type == "local" and not os.path.exists(task.source):
         raise HTTPException(status_code=400, detail=f"Brak katalogu: {task.source}")
-    #to wymaga poprawy?
-    #elif task.type == "cloud" and not os.path.exists(task.destination) and not task.destination.startswith("http"):
-    #    os.makedirs(task.destination, exist_ok=True)
         
     new_task = task.dict()
     new_task["id"] = new_id
@@ -689,9 +647,6 @@ def update_task(task_id: int, fields: TaskSchema):
     
     if fields.type == "local" and not os.path.exists(fields.source):
         raise HTTPException(status_code=400, detail="Brak źródła")
-    #to wymaga poprawy?
-    #elif fields.type == "cloud" and not os.path.exists(fields.destination):
-    #    os.makedirs(fields.destination, exist_ok=True)
     
     updated_task = fields.dict()
     updated_task["id"] = task_id
@@ -733,7 +688,6 @@ def run_task(task_id: int):
 
 @app.post("/api/tasks/{task_id}/stop", dependencies=[Depends(verify_api_key)])
 def stop_task(task_id: int):
-    # Pobieramy konfigurację zadania, aby mieć dostęp do jego nazwy oraz webhooków powiadomień
     config = get_all_tasks()
     task = next((t for t in config.get("tasks", []) if t["id"] == task_id), None)
     if not task: 
@@ -745,7 +699,6 @@ def stop_task(task_id: int):
         try:
             log_to_app(f"Żądanie zatrzymania zadania ID {task_id}. Wysyłanie sygnału zakończenia.")
             
-            # 1. Wysyłamy dedykowaną notyfikację na Discord/Ntfy ZAMIAST standardowej
             send_notification(
                 task["name"], 
                 "Zatrzymane na żądanie 🛑", 
@@ -753,7 +706,6 @@ def stop_task(task_id: int):
                 ntfy_url=task.get("ntfy_url")
             )
             
-            # 2. Ustawiamy status "Zatrzymane" w bazie danych
             config = get_all_tasks()
             for t in config.get("tasks", []):
                 if t["id"] == task_id:
@@ -761,7 +713,6 @@ def stop_task(task_id: int):
                     break
             save_config(config)
             
-            # 3. Ubijamy proces systemowy
             process.terminate()
             try:
                 process.wait(timeout=5)
@@ -772,7 +723,6 @@ def stop_task(task_id: int):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Błąd podczas zatrzymywania procesu: {str(e)}")
             
-    # Jeśli fizycznego procesu nie ma w pamięci, ale status w pliku JSON wisiał jako RUNNING
     config = get_all_tasks()
     for t in config.get("tasks", []):
         if t["id"] == task_id and t["status"] == "RUNNING":
@@ -799,7 +749,7 @@ def restore_task(task_id: int):
         
     scheduler.add_job(
         execute_restore_process, 
-        args=[task_id],  # <-- POPRAWKA: Przekazujemy tylko task_id
+        args=[task_id], 
         id=f"manual_restore_{task_id}_{int(datetime.now().timestamp())}", 
         name=f"Manual Restore: {task['name']}",
         misfire_grace_time=None
@@ -850,7 +800,7 @@ def browse_folder(path: str = ""):
         directories.sort(key=lambda x: x["name"].lower())
         return {"current_path": path, "directories": directories}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
-    
+
 # --- ENDPOINTY LOGOWANIA I REJESTRACJI ---
 
 @app.post("/api/auth/login")
@@ -896,3 +846,99 @@ def register(credentials: RegisterSchema):
     save_config(config)
     
     return {"message": "Konto zarejestrowane pomyślnie."}
+
+# --- KLASA KRYPTOGRAFICZNA I ENDPOINTY IMPORTU/EKSPORTU ---
+
+class CryptoHelper:
+    @staticmethod
+    def derive_key(password: str, salt: bytes) -> bytes:
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100_000,
+        )
+        return kdf.derive(password.encode("utf-8"))
+
+    @classmethod
+    def encrypt_data(cls, data: bytes, password: str) -> bytes:
+        salt = os.urandom(16)
+        nonce = os.urandom(12)
+        key = cls.derive_key(password, salt)
+        aesgcm = AESGCM(key)
+        ciphertext = aesgcm.encrypt(nonce, data, None)
+        return salt + nonce + ciphertext
+
+    @classmethod
+    def decrypt_data(cls, encrypted_blob: bytes, password: str) -> bytes:
+        if len(encrypted_blob) < 28:
+            raise ValueError("Plik jest uszkodzony lub zbyt krótki.")
+        salt = encrypted_blob[:16]
+        nonce = encrypted_blob[16:28]
+        ciphertext = encrypted_blob[28:]
+        key = cls.derive_key(password, salt)
+        aesgcm = AESGCM(key)
+        return aesgcm.decrypt(nonce, ciphertext, None)
+
+@app.post("/api/config/export", dependencies=[Depends(verify_api_key)])
+def export_configuration(password: str = Form(...)):
+    if not password or len(password) < 4:
+        raise HTTPException(status_code=400, detail="Hasło szyfrowania musi mieć co najmniej 4 znaki.")
+
+    config_data = get_all_tasks()
+
+    rclone_content = ""
+    if os.path.exists(RCLONE_CONFIG_PATH):
+        with open(RCLONE_CONFIG_PATH, "r", encoding="utf-8") as f:
+            rclone_content = f.read()
+
+    payload = {
+        "version": 1,
+        "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "config": config_data,
+        "rclone_conf": rclone_content
+    }
+
+    raw_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    
+    try:
+        encrypted_bytes = CryptoHelper.encrypt_data(raw_bytes, password)
+        filename = f"backup_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}.enc"
+        
+        return Response(
+            content=encrypted_bytes,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        log_to_app(f"Błąd podczas eksportu konfiguracji: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Błąd szyfrowania: {str(e)}")
+
+@app.post("/api/config/import", dependencies=[Depends(verify_api_key)])
+async def import_configuration(password: str = Form(...), file: UploadFile = File(...)):
+    if not password:
+        raise HTTPException(status_code=400, detail="Brak hasła do odszyfrowania.")
+
+    try:
+        encrypted_blob = await file.read()
+        decrypted_bytes = CryptoHelper.decrypt_data(encrypted_blob, password)
+        payload = json.loads(decrypted_bytes.decode("utf-8"))
+
+        if "config" not in payload:
+            raise HTTPException(status_code=400, detail="Nieprawidłowa struktura pliku konfiguracyjnego.")
+
+        save_config(payload["config"])
+
+        if "rclone_conf" in payload and payload["rclone_conf"] is not None:
+            os.makedirs(os.path.dirname(RCLONE_CONFIG_PATH), exist_ok=True)
+            with open(RCLONE_CONFIG_PATH, "w", encoding="utf-8") as f:
+                f.write(payload["rclone_conf"])
+
+        load_all_tasks_into_scheduler()
+        
+        log_to_app("Konfiguracja (config.json + rclone.conf) została pomyślnie zaimportowana i przeładowana.")
+        return {"message": "Konfiguracja zaimportowana pomyślnie."}
+
+    except Exception as e:
+        log_to_app(f"Błąd podczas importu konfiguracji: {str(e)}")
+        raise HTTPException(status_code=400, detail="Nieprawidłowe hasło lub uszkodzony plik konfiguracyjny.")
