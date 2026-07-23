@@ -35,7 +35,7 @@ services:
           memory: 768M  # Maksymalny twardy limit RAM (np. 512 Megabajtów)
         reservations:
           memory: 128M  # Pamięć zarezerwowana na start
-    command: sh -c "pip install pyjwt bcrypt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "pip install pyjwt bcrypt cryptography python-multipart && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
       
   backup-frontend:
     # Zmieniamy z "image" na "build", aby Docker użył nowo utworzonego frontend/Dockerfile
