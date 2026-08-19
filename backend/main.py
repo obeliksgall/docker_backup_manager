@@ -125,19 +125,24 @@ def log_to_app(message: str):
     logger.info(message)
 
 def send_notification(task_name: str, status: str, discord_url: str = None, ntfy_url: str = None, skipped_files: list = None):
-    emoji = "✅" if status in ["OK", "SUKCES"] else "❌"
-    msg = f"{emoji} Zadanie '{task_name}' zakończyło się statusem: {status}."
+    emoji = "✅" if status in ["OK", "SUKCES", "SUCCESS"] else "❌"
     
+    # 1. Podstawowa, krótka wiadomość (używana dla ntfy)
+    short_msg = f"{emoji} Zadanie '{task_name}' zakończyło się statusem: {status}."
+    
+    # 2. Rozbudowana wiadomość z listą błędów/plików (tylko dla Discorda)
+    discord_msg = short_msg
     if skipped_files:
-        msg += "\n\n⚠️ **Wykryto zbyt długie ścieżki (Pominięte przez OneDrive - limit 400 znaków):**"
+        discord_msg += "\n\n⚠️ **Wykryto zbyt długie ścieżki (Pominięte przez OneDrive - limit 400 znaków):**"
         for file_path in skipped_files[:10]:
-            msg += f"\n• `{file_path}`"
+            discord_msg += f"\n• `{file_path}`"
         if len(skipped_files) > 10:
-            msg += f"\n... i {len(skipped_files) - 10} więcej. Sprawdź pełny log zadania."
+            discord_msg += f"\n... i {len(skipped_files) - 10} więcej. Sprawdź pełny log zadania."
 
+    # --- Wysyłka na Discord (z pełną listą błędów) ---
     if discord_url and discord_url not in ["string", "null", "None", ""]:
         try:
-            payload = json.dumps({"content": msg}).encode("utf-8")
+            payload = json.dumps({"content": discord_msg}).encode("utf-8")
             req = urllib.request.Request(
                 discord_url, 
                 data=payload, 
@@ -149,10 +154,10 @@ def send_notification(task_name: str, status: str, discord_url: str = None, ntfy
             with urllib.request.urlopen(req) as res: pass
         except Exception as e: log_to_app(f"Błąd powiadomienia Discord: {str(e)}")
 
+    # --- Wysyłka na ntfy (TYLKO krótki status, BEZ błędów i plików) ---
     if ntfy_url and ntfy_url not in ["string", "null", "None", ""]:
         try:
-            ntfy_msg = msg.replace("**", "").replace("`", "")
-            payload = ntfy_msg.encode("utf-8")
+            payload = short_msg.encode("utf-8")
             req = urllib.request.Request(
                 ntfy_url, 
                 data=payload, 
