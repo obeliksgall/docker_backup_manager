@@ -291,6 +291,38 @@ Diagnostykę zawsze zaczynaj od `sudo docker compose logs -f backup-backend` ora
 
 ---
 
+APScheduler jeżeli zakras 0-6 nie działa:
+
+Dni tygodnia:
+mon – Poniedziałek (Monday)
+tue – Wtorek (Tuesday)
+wed – Środa (Wednesday)
+thu – Czwartek (Thursday)
+fri – Piątek (Friday)
+sat – Sobota (Saturday)
+sun – Niedziela (Sunday)
+
+Możesz również podawać zakresy, np. mon-fri (od poniedziałku do piątku).
+
+Miesiące:
+
+jan – Styczeń (January)
+feb – Luty (February)
+mar – Marzec (March)
+apr – Kwiecień (April)
+may – Maj (May)
+jun – Czerwiec (June)
+jul – Lipiec (July)
+aug – Sierpień (August)
+sep – Wrzesień (September)
+oct – Październik (October)
+nov – Listopad (November)
+dec – Grudzień (December)
+
+Tu również działają zakresy, np. jan-jun (od stycznia do czerwca).
+
+---
+
 ## 📄 Licencja
 
 Projekt udostępniony na licencji [MIT](LICENSE).
