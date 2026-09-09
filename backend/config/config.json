@@ -84,9 +84,5 @@
     }
   ],
   "users": [
-    {
-      "username": "admin",
-      "password": "$argon2id$v=19$m=65536,t=3,p=4$hashed_password_placeholder"
-    }
   ]
 }
