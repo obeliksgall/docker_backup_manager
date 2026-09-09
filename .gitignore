@@ -1,0 +1,28 @@
+# Środowisko i sekrety (NIGDY nie commituj do repo!)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+
+# Node & Frontend
+node_modules/
+dist/
+*.local
+
+# Logi i dane wykonawcze
+backend/logs/
+*.log
+
+# Opcjonalnie: lokalne pliki konfiguracyjne ze stanem
+# backend/config/config.json
+
+# Pliki systemowe
+.DS_Store
+Thumbs.db
