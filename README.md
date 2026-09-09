@@ -2,6 +2,8 @@
 
 Nowoczesny, bezpieczny i w pełni kontenerowy system do zarządzania kopiami zapasowymi (lokalnymi oraz chmurowymi), dedykowany dla serwerów NAS oraz środowisk Linux. Aplikacja oferuje pełny podgląd postępu i prędkości transferu w czasie rzeczywistym, wizualny kreator harmonogramów Cron, kolejkowanie zadań zabezpieczające wydajność dyskową (I/O), łańcuchowanie potoków (pipelines), powiadomienia (Discord / ntfy / E-mail SMTP) oraz rozproszoną autoryzację użytkowników — w lekkiej i niezawodnej architekturze flat-file.
 
+Pisany z pomocą AI
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
