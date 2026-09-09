@@ -1,0 +1,97 @@
+{
+  "settings": {
+    "rclone_flags": [
+      "--buffer-size=64M",
+      "--transfers=4",
+      "--checkers=8",
+      "--contimeout=60s"
+    ]
+  },
+  "tasks": [
+    {
+      "id": 1,
+      "name": "Kopia Lokalna - Dokumenty (Początek Łańcucha)",
+      "next_task_id": 2,
+      "source": "/storage/documents",
+      "destination": "/storage/backup/local/documents",
+      "type": "local",
+      "mode": "mirror",
+      "schedule": "0 2 * * *",
+      "enabled": true,
+      "restore_enabled": false,
+      "exclude": [
+        "*.tmp",
+        "~*",
+        ".DS_Store",
+        "Thumbs.db"
+      ],
+      "custom_flags": [],
+      "retention_days": 7,
+      "status": "OK",
+      "last_run": "2026-09-09T02:00:15",
+      "discord_webhook": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_TOKEN",
+      "ntfy_url": "https://ntfy.sh/twoj-prywatny-temat-alertow",
+      "email_enabled": true,
+      "email_recipients": "admin@domena.pl",
+      "email_level": "tylko_bledy"
+    },
+    {
+      "id": 2,
+      "name": "Kopia Chmurowa - Dokumenty (Krok 2 - Google Drive)",
+      "next_task_id": null,
+      "source": "/storage/backup/local/documents",
+      "destination": "gdrive:/backups/documents",
+      "type": "cloud",
+      "mode": "copy",
+      "schedule": "0 3 * * *",
+      "enabled": true,
+      "restore_enabled": true,
+      "exclude": [],
+      "custom_flags": [
+        "--fast-list",
+        "--drive-chunk-size=64M"
+      ],
+      "retention_days": 30,
+      "status": "OK",
+      "last_run": "2026-09-09T03:00:22",
+      "discord_webhook": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_TOKEN",
+      "ntfy_url": null,
+      "email_enabled": true,
+      "email_recipients": "admin@domena.pl",
+      "email_level": "tylko_bledy"
+    },
+    {
+      "id": 3,
+      "name": "Archiwum Zdjęć - OneDrive (Tylko Ręcznie)",
+      "next_task_id": null,
+      "source": "/storage/photos",
+      "destination": "onedrive:/backups/photos",
+      "type": "cloud",
+      "mode": "copy",
+      "schedule": "",
+      "enabled": true,
+      "restore_enabled": false,
+      "exclude": [
+        "*.raw",
+        "*.tmp"
+      ],
+      "custom_flags": [
+        "--bwlimit=15M"
+      ],
+      "retention_days": 0,
+      "status": null,
+      "last_run": null,
+      "discord_webhook": null,
+      "ntfy_url": null,
+      "email_enabled": false,
+      "email_recipients": null,
+      "email_level": "tylko_bledy"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "password": "$argon2id$v=19$m=65536,t=3,p=4$q8J...hasz_argon2_lub_bcrypt..."
+    }
+  ]
+}

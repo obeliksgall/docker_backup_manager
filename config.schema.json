@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/docker-backup-manager/config.schema.json",
+  "title": "Docker Backup Manager - Schemat Konfiguracji",
+  "description": "Oficjalny schemat walidacji JSON dla konfiguracji zadań, ustawień i użytkowników Docker Backup Manager (config.json).",
+  "type": "object",
+  "properties": {
+    "settings": {
+      "type": "object",
+      "title": "Ustawienia Globalne",
+      "description": "Globalne ustawienia silników synchronizacji i aplikacji.",
+      "properties": {
+        "rclone_flags": {
+          "type": "array",
+          "title": "Globalne flagi Rclone",
+          "description": "Flagi wiersza poleceń przekazywane do każdego polecenia rclone (np. --buffer-size=64M, --transfers=4, --checkers=8).",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "rclone_flags"
+      ]
+    },
+    "tasks": {
+      "type": "array",
+      "title": "Zadania Kopiowania Zapasowego",
+      "description": "Lista zdefiniowanych zadań backupu (lokalnych i chmurowych).",
+      "items": {
+        "type": "object",
+        "title": "Zadanie Kopiowania",
+        "description": "Definicja pojedynczego zadania synchronizacji lub tworzenia kopii.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "title": "ID Zadania",
+            "description": "Unikalny identyfikator numeryczny zadania."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Nazwa Zadania",
+            "description": "Przyjazna nazwa wyświetlana w interfejsie i powiadomieniach."
+          },
+          "next_task_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "title": "Następne zadanie w łańcuchu (Pipeline)",
+            "description": "ID kolejnego zadania uruchamianego automatycznie po pomyślnym zakończeniu tego zadania. Wartość null oznacza koniec potoku.",
+            "default": null
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Ścieżka źródłowa",
+            "description": "Ścieżka do katalogu źródłowego wewnątrz kontenera (np. /storage/documents)."
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Ścieżka docelowa",
+            "description": "Ścieżka do folderu docelowego dla kopii lokalnej (np. /storage/backup) lub zdalny magazyn chmurowy rclone (np. gdrive:/backups)."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "local",
+              "cloud"
+            ],
+            "title": "Silnik transferu",
+            "description": "Rodzaj zadania: \"local\" (używa rsync) lub \"cloud\" (używa rclone)."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mirror",
+              "copy",
+              "move"
+            ],
+            "title": "Tryb synchronizacji",
+            "description": "\"mirror\" (lustrzane odbicie z usuwaniem/retencją), \"copy\" (bezpieczne kopiowanie przyrostowe), \"move\" (przenoszenie ze skasowaniem ze źródła)."
+          },
+          "schedule": {
+            "type": "string",
+            "title": "Harmonogram Cron",
+            "description": "Standardowe 5-polowe wyrażenie Cron (np. \"0 2 * * *\") lub pusty ciąg \"\" dla zadań uruchamianych wyłącznie ręcznie."
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Aktywne w harmonogramie",
+            "description": "Określa, czy zadanie jest aktywnie planowane przez silnik Cron.",
+            "default": true
+          },
+          "restore_enabled": {
+            "type": "boolean",
+            "title": "Zezwolenie na Restore",
+            "description": "Zabezpieczenie przed przypadkowym odwróceniem kierunku synchronizacji (musi mieć wartość true, aby umożliwić przywrócenie danych).",
+            "default": false
+          },
+          "exclude": {
+            "type": "array",
+            "title": "Maski wykluczeń",
+            "description": "Lista masek plików i katalogów pomijanych podczas tworzenia kopii (np. [\"*.tmp\", \"~*\", \".DS_Store\", \"Thumbs.db\"]).",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "custom_flags": {
+            "type": "array",
+            "title": "Własne flagi rsync / rclone",
+            "description": "Dodatkowe flagi wiersza poleceń przekazywane do silnika kopiowania dla tego konkretnego zadania (np. [\"--fast-list\", \"--bwlimit=10M\"]).",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "retention_days": {
+            "type": "integer",
+            "minimum": 0,
+            "title": "Dni retencji w koszu",
+            "description": "Liczba dni przechowywania usuniętych plików w katalogu kosza <destination>-trash/YYYY-MM-DD/ dla trybu mirror. Wartość 0 oznacza brak kosza (natychmiastowe usuwanie).",
+            "default": 0
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "title": "Status ostatniego wykonania",
+            "description": "Wynik ostatniego uruchomienia zadania, np. \"OK\", \"Błąd\", \"Zatrzymane\", \"RUNNING\" lub null.",
+            "default": null
+          },
+          "last_run": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "title": "Czas ostatniego uruchomienia",
+            "description": "Data i godzina ostatniego uruchomienia zadania w formacie ISO (np. \"2026-09-09T02:00:15\") lub null.",
+            "default": null
+          },
+          "discord_webhook": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "title": "Webhook Discord",
+            "description": "Adres URL webhooka Discord do wysyłania powiadomień o statusie zadania.",
+            "default": null
+          },
+          "ntfy_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "title": "URL ntfy.sh",
+            "description": "Adres URL serwera i tematu ntfy.sh do wysyłania powiadomień push (np. https://ntfy.sh/moj-temat).",
+            "default": null
+          },
+          "email_enabled": {
+            "type": "boolean",
+            "title": "Powiadomienia E-mail",
+            "description": "Czy wysyłać powiadomienia e-mail przez skonfigurowany w .env serwer SMTP.",
+            "default": false
+          },
+          "email_recipients": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "title": "Odbiorcy E-mail",
+            "description": "Jeden lub więcej adresów e-mail odbiorców rozdzielonych przecinkami.",
+            "default": ""
+          },
+          "email_level": {
+            "type": "string",
+            "enum": [
+              "wszystkie",
+              "bledy_i_onedrive",
+              "tylko_bledy"
+            ],
+            "title": "Warunek wysyłki E-mail",
+            "description": "Poziom zdarzeń wyzwalających e-mail: \"wszystkie\" (każde ukończenie), \"bledy_i_onedrive\" (błędy oraz ostrzeżenia o pominiętych plikach), \"tylko_bledy\" (wyłącznie niepowodzenia).",
+            "default": "tylko_bledy"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "source",
+          "destination",
+          "type",
+          "mode",
+          "schedule",
+          "enabled",
+          "restore_enabled",
+          "exclude",
+          "retention_days",
+          "email_enabled",
+          "email_level"
+        ]
+      }
+    },
+    "users": {
+      "type": "array",
+      "title": "Użytkownicy",
+      "description": "Lista zarejestrowanych użytkowników aplikacji z zahaszowanymi hasłami.",
+      "items": {
+        "type": "object",
+        "title": "Konto Użytkownika",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Nazwa użytkownika",
+            "description": "Login użytkownika."
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Skrót hasła",
+            "description": "Zahaszowane hasło użytkownika w formacie Argon2id ($argon2id$...) lub bcrypt ($2b$...)."
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "tasks"
+  ]
+}

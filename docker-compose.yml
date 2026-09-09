@@ -6,53 +6,43 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
-      # Mapujemy folder ./backend/config z hosta do /app/config w kontenerze (tam trzymasz config.json i rclone.conf)
+      # Mapowanie konfiguracji (config.json oraz rclone.conf)
       - ./backend/config:/app/config
-      # Tworzymy i mapujemy dedykowany folder na logi zadań i aplikacji
+      # Dedykowany folder na logi zadań i aplikacji
       - ./backend/logs:/app/logs
-      # Mapujemy folder ./data z głównego katalogu jako nasz storage na backupy
+      # Główny magazyn storage na kopie i dane źródłowe
       - ./data:/storage
-      # Mapujesz foldery z różnych miejsc NAS-a do jednego wspólnego punktu w kontenerze:
-      #- /vol1/dane1:/storage/ZBIORCZY/dane1
-      #- /vol1/dane2:/storage/ZBIORCZY/dane2
-      #- /jakis_inny_dysk/dane3:/storage/ZBIORCZY/dane3
+      # Możesz również podmontować dodatkowe wolumeny z NAS:
+      # - /vol1/dane:/storage/dane:ro
     environment:
       - TZ=Europe/Warsaw
-      - API_KEY=${API_KEY}
-      - ADMIN_USERNAME=${ADMIN_USERNAME}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
-      - DISABLE_REGISTRATION=${DISABLE_REGISTRATION}
-      - JWT_SECRET=${JWT_SECRET}
-      - SMTP_HOST=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASS=${SMTP_PASS}
-    # OGRANICZENIE ZASOBÓW DLA BACKENDU (FastAPI + Rclone)
+      - APP_LANG=pl # Język logów i powiadomień: pl lub en
+      - API_KEY=${API_KEY:-}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-false}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
     deploy:
       resources:
         limits:
-          memory: 768M  # Maksymalny twardy limit RAM (np. 512 Megabajtów)
+          memory: 768M
         reservations:
-          memory: 128M  # Pamięć zarezerwowana na start
-    command: sh -c "pip install pyjwt bcrypt cryptography python-multipart && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
-      
+          memory: 128M
+
   backup-frontend:
-    # Zmieniamy z "image" na "build", aby Docker użył nowo utworzonego frontend/Dockerfile
     build: ./frontend
     container_name: backup-frontend
     restart: always
     ports:
       - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      # Kluczowy element: anonimowy wolumen, który chroni node_modules zainstalowane 
-      # wewnątrz kontenera przed nadpisaniem przez Twój (pusty) folder z komputera/NASa
-      - /app/node_modules
     environment:
       - TZ=Europe/Warsaw
-      - VITE_API_KEY=${API_KEY}
-    # OGRANICZENIE ZASOBÓW DLA FRONTENDU (Vite / Node)
+      # Adres API (opcjonalny - domyślnie frontend pyta backend pod ten sam host lub port 8000)
+      - VITE_API_URL=${VITE_API_URL:-}
     deploy:
       resources:
         limits:
