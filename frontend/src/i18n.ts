@@ -105,6 +105,8 @@ const resources = {
 	  "email_lvl_warnings": "Błędy oraz ostrzeżenia ścieżek",
 	  "email_lvl_errors": "Tylko krytyczne błędy",
 	  "lbl_last_run": "Ostatnie uruchomienie",
+      "transfer_progress": "Postęp transferu w czasie rzeczywistym",
+      "scanning_files": "Skanowanie i weryfikacja plików...",
 	  "modal_config_title": "Zarządzanie Konfiguracją",
 	  "tab_export": "Eksport (Kopia)",
 	  "tab_import": "Import (Przywróć)",

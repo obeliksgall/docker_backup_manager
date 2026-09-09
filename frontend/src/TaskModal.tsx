@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Save, Server, Cloud, FolderOpen, Mail } from 'lucide-react';
 import FolderBrowserModal from './FolderBrowserModal';
+import CronBuilder from './CronBuilder';
+import { API_URL, getAuthHeaders } from './api';
 
 interface Task {
   id?: number;
@@ -58,8 +60,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
     if (isOpen) {
       const fetchRawTasks = async () => {
         try {
-          const res = await fetch(`http://${window.location.hostname}:8000/api/tasks`, {
-            headers: { 'X-API-Key': import.meta.env.VITE_API_KEY || 'DomyślnyKluczBezpieczeństwa' }
+          const res = await fetch(`${API_URL}/api/tasks`, {
+            headers: getAuthHeaders()
           });
           const data = await res.json();
           if (data && Array.isArray(data.tasks)) setAllTasks(data.tasks);
@@ -234,7 +236,7 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_sync_mode')}</label>
               <select
@@ -247,20 +249,22 @@ export default function TaskModal({ isOpen, onClose, onSave, task }: TaskModalPr
               </select>
             </div>
             <div>
-              <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_cron')}</label>
-              <input
-                required type="text" name="schedule" value={formData.schedule} onChange={handleChange}
-                placeholder={t('ph_cron') || ''}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500 transition"
-              />
-            </div>
-            <div>
               <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_retention')}</label>
               <input
                 type="number" name="retention_days" value={formData.retention_days} onChange={handleChange} min="0"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500 transition"
               />
             </div>
+          </div>
+
+          {/* Wizualny Kreator Harmonogramu Cron */}
+          <div>
+            <label className="block text-slate-400 font-medium mb-1.5">{t('lbl_cron')}</label>
+            <CronBuilder
+              value={formData.schedule}
+              onChange={(newCron) => setFormData(prev => ({ ...prev, schedule: newCron }))}
+              lang={t('lang') || 'pl'}
+            />
           </div>
 
           <div>

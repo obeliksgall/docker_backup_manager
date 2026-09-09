@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { API_URL, getAuthHeaders } from './api';
+import { useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
   Shield, RefreshCw, Server, Cloud, Play, CheckCircle, XCircle, 
@@ -10,7 +11,17 @@ import LogModal from './LogModal';
 import Login from './Login';
 import ConfigModal from './ConfigModal';
 
-const API_URL = `http://${window.location.hostname}:8000`;
+// API_URL imported from ./api
+
+interface TaskProgress {
+  task_id?: number;
+  percent?: number;
+  speed?: string;
+  transferred_files?: number;
+  total_files?: number | null;
+  eta?: string;
+  updated_at?: number;
+}
 
 interface Task {
   id: number;
@@ -30,6 +41,7 @@ interface Task {
   discord_webhook?: string;
   ntfy_url?: string;
   last_run?: string | null;
+  progress?: TaskProgress | null;
 }
 
 export default function App() {
@@ -60,10 +72,7 @@ export default function App() {
   };
 
   const getHeaders = () => {
-    return {
-      'Content-Type': 'application/json',
-      'X-API-Key': import.meta.env.VITE_API_KEY || 'DomyślnyKluczBezpieczeństwa'
-    };
+    return getAuthHeaders();
   };
 
   const handleLoginSuccess = (newToken: string, newUsername: string) => {
@@ -81,15 +90,18 @@ export default function App() {
     setTasks([]);
   };
 
-  const fetchTasks = async () => {
+  const tasksRef = useRef<Task[]>([]);
+  tasksRef.current = tasks;
+
+  const fetchTasks = async (showSpinner = false) => {
     if (!token) return;
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const response = await fetch(`${API_URL}/api/tasks`, {
         headers: getHeaders()
       });
       
-      if (response.status === 403) {
+      if (response.status === 401 || response.status === 403) {
         handleLogout();
         return;
       }
@@ -107,7 +119,7 @@ export default function App() {
       setError(err.message || 'Nie udało się połączyć z API');
       setTasks([]);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   };
 
@@ -229,18 +241,45 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
 
-    fetchTasks();
+    fetchTasks(true);
 
     const interval = setInterval(() => {
-      const hasRunningTasks = tasks.some(task => task.status === 'RUNNING');
-      
+      const hasRunningTasks = tasksRef.current.some(task => task.status === 'RUNNING');
       if (hasRunningTasks) {
-        fetchTasks();
+        fetchTasks(false);
       }
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [token, tasks]);
+  }, [token]);
+
+  // Szybki polling postępu w czasie rzeczywistym (co 1.5s) tylko gdy zadanie ma status RUNNING
+  useEffect(() => {
+    if (!token) return;
+    const hasRunning = tasks.some(t => t.status === 'RUNNING');
+    if (!hasRunning) return;
+
+    const progressInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/tasks/progress`, {
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          const progressMap: Record<number, TaskProgress> = await res.json();
+          setTasks(prevTasks => prevTasks.map(t => {
+            if (progressMap[t.id]) {
+              return { ...t, progress: progressMap[t.id] };
+            }
+            return t;
+          }));
+        }
+      } catch {
+        // Ignoruj przejściowe zakłócenia sieciowe
+      }
+    }, 1500);
+
+    return () => clearInterval(progressInterval);
+  }, [token, tasks.map(t => t.status).join(',')]);
 
   if (!token) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
@@ -439,6 +478,53 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* PASEK POSTĘPU W CZASIE RZECZYWISTYM (STATUS RUNNING) */}
+                {task.status === 'RUNNING' && (
+                  <div className="my-3 bg-slate-950/85 border border-indigo-500/30 rounded-xl p-3 shadow-inner">
+                    <div className="flex justify-between items-center text-xs mb-1.5">
+                      <span className="font-semibold text-indigo-400 flex items-center gap-1.5">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                        </span>
+                        {t('transfer_progress') || 'Postęp transferu'}
+                      </span>
+                      <span className="font-mono font-bold text-white text-xs">
+                        {task.progress && typeof task.progress.percent === 'number' 
+                          ? `${task.progress.percent}%` 
+                          : 'Skanowanie...'}
+                      </span>
+                    </div>
+                    
+                    {/* Pasek postepu */}
+                    <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden mb-2">
+                      <div 
+                        className="bg-indigo-500 h-2 rounded-full transition-all duration-300 ease-out shadow-[0_0_8px_rgba(99,102,241,0.6)]"
+                        style={{ width: `${Math.min(100, Math.max(0, task.progress?.percent || 0))}%` }}
+                      />
+                    </div>
+
+                    {/* Szczegóły: pliki i prędkość */}
+                    <div className="flex justify-between items-center text-[11px] text-slate-400 font-mono">
+                      <span>
+                        {task.progress?.transferred_files !== undefined ? (
+                          task.progress.total_files ? (
+                            `${task.progress.transferred_files} / ${task.progress.total_files} plików`
+                          ) : (
+                            `${task.progress.transferred_files} plików`
+                          )
+                        ) : (t('scanning_files') || 'Obliczanie plików...')}
+                      </span>
+                      <span className="text-slate-300 font-medium">
+                        {task.progress?.speed ? (
+                          <span>{task.progress.speed}</span>
+                        ) : task.progress?.eta ? (
+                          <span>ETA: {task.progress.eta}</span>
+                        ) : null}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 {/* Stopka karty z przyciskiem STOP */}
                 <div className="border-t border-slate-800/60 pt-4 mt-2 flex justify-between items-center gap-2 select-none">
                   <div className="flex items-center gap-1.5 text-xs">

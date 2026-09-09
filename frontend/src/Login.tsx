@@ -1,3 +1,4 @@
+import { API_URL } from './api';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shield, Lock, User, Loader2, AlertCircle, CheckCircle2, Globe } from 'lucide-react';
@@ -20,7 +21,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const API_URL = `http://${window.location.hostname}:8000`;
+  // API_URL imported from ./api
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);

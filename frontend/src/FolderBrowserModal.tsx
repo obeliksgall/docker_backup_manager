@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Folder, FolderPlus, ChevronLeft, Loader2 } from 'lucide-react';
-
-const API_KEY = import.meta.env.VITE_API_KEY;
-const API_URL = `http://${window.location.hostname}:8000`;
+import { API_URL, getAuthHeaders } from './api';
 
 interface NASDirectory {
   name: string;
@@ -39,10 +37,9 @@ export default function FolderBrowserModal({ isOpen, onClose, onSelect, title, i
     setLoading(true);
     setError(null);
     const safePath = path.trim() === '' ? '/' : path;
-
     try {
       const response = await fetch(`${API_URL}/api/browse?path=${encodeURIComponent(safePath)}`, {
-        headers: { 'X-API-Key': API_KEY }
+        headers: getAuthHeaders()
       });
       const data = await response.json();
       
