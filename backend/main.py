@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Security, Depends, UploadFile, File,
 from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -413,7 +413,14 @@ def clean_all_trash_folders_cron():
             clean_old_trash_folders(task)
 
     log_to_app(t("logs_rotation_cron"))
-    cutoff = time.time() - (365 * 24 * 60 * 60)
+    # Przed zmianą:
+    # cutoff = time.time() - (365 * 24 * 60 * 60)
+
+    # Po zmianie:
+    settings = config.get("settings", {})
+    # Domyślnie 365 dni, jeśli nie ustawiono w GUI
+    retention_days = int(settings.get("log_retention_days", 365))
+    cutoff = time.time() - (retention_days * 24 * 60 * 60)
     if os.path.exists(LOGS_BASE_DIR):
         for root, _, files in os.walk(LOGS_BASE_DIR):
             for file in files:
@@ -1075,3 +1082,26 @@ async def import_configuration(password: str = Form(...), file: UploadFile = Fil
     except Exception as e:
         log_to_app(f"Błąd importu konfiguracji: {str(e)}")
         raise HTTPException(status_code=400, detail="Nieprawidłowe hasło lub uszkodzony plik konfiguracyjny.")
+
+class SettingsSchema(BaseModel):
+    log_retention_days: int = Field(default=365, ge=1, le=3650)
+
+@app.get("/api/settings", dependencies=[Depends(verify_auth)])
+def get_system_settings():
+    config = get_all_tasks()
+    settings = config.get("settings", {})
+    return {
+        "log_retention_days": settings.get("log_retention_days", 365),
+        "rclone_flags": settings.get("rclone_flags", [])
+    }
+
+@app.post("/api/settings", dependencies=[Depends(verify_auth)])
+def update_system_settings(payload: SettingsSchema):
+    config = get_all_tasks()
+    if "settings" not in config:
+        config["settings"] = {}
+    
+    config["settings"]["log_retention_days"] = payload.log_retention_days
+    save_config(config)
+    log_to_app(f"Zaktualizowano czas retencji logów na: {payload.log_retention_days} dni")
+    return {"status": "success", "settings": config["settings"]}
